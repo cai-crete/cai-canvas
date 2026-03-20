@@ -1078,6 +1078,30 @@ ${layerC_property}
               if (part.inlineData) {
                 const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
                 
+                // V105: Detail View Validation
+                if (viewConfig.name === "Detail View") {
+                  try {
+                    console.log("[V105] Validating Detail View generation...");
+                    const valResult = await ai.models.generateContent({
+                      model: 'gemini-2.5-flash',
+                      contents: {
+                        parts: [
+                          { inlineData: { data: part.inlineData.data, mimeType: part.inlineData.mimeType } },
+                          { text: "Is this image a detailed, close-up face-on architectural view? It MUST strictly show a very close-up detail, not the entire full building. Answer ONLY 'YES' or 'NO'." }
+                        ]
+                      }
+                    });
+                     const txt = valResult.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase() || "";
+                     if (txt.includes('NO') || txt.includes('FALSE')) {
+                       console.warn("[V105] Validation failed (Not a detail view). Returning false to trigger retry.");
+                       return false; 
+                     }
+                     console.log("[V105] Validation passed!");
+                  } catch(e) {
+                     console.warn("[V105] Validation API failed, proceeding anyway", e);
+                  }
+                }
+
                 await new Promise<void>((resolve) => {
                   const img = new Image();
                   img.onload = () => {
@@ -1153,13 +1177,32 @@ ${layerC_property}
           return false;
         };
 
-        try {
-          const success = await runGen(IMAGE_GEN);
-          if (!success) throw new Error("Fallback needed");
-        } catch (e) {
-          const successFallback = await runGen(IMAGE_GEN_FALLBACK);
-          if (!successFallback) {
-             console.error("Failed to generate view with fallback");
+        let success = false;
+        let retries = 0;
+        // V105: Max 3 retries for Detail View to enforce strict validation
+        const maxRetries = viewConfig.name === "Detail View" ? 3 : 1;
+
+        while (!success && retries < maxRetries) {
+          retries++;
+          try {
+            success = await runGen(IMAGE_GEN);
+            if (!success) {
+               console.warn(`[V105] Generation returned false, retry ${retries}/${maxRetries}`);
+            }
+          } catch (e) {
+            console.warn(`[V105] Generation error on retry ${retries}`, e);
+          }
+          
+          if (!success && retries >= maxRetries) {
+            console.warn(`[V105] Max retries reached. Trying fallback model...`);
+            try {
+              const successFallback = await runGen(IMAGE_GEN_FALLBACK);
+              if (!successFallback) {
+                console.error(`[V105] Failed to generate view with fallback`);
+              }
+            } catch(e) {
+              console.error(`[V105] Fallback also failed`, e);
+            }
           }
         }
       } // End of viewsToGenerate loop
