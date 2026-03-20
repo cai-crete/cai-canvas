@@ -1448,7 +1448,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                 
                   {/* V89: Dots Navigation Replaced by Action Buttons */}
                   <div className="pt-5 pb-3 px-5">
-                    <div className="flex items-stretch h-[36px] border border-black dark:border-white rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+                    <div className="flex items-stretch h-[36px] border border-black/50 dark:border-white/50 rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
                       <button 
                         onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
                         disabled={!selectedItemId}
