@@ -258,6 +258,7 @@ export default function App() {
 
   // --- Effects ---
   // V74: Synchronize selected item's parameters to UI panels, and reset on deselect
+  // V108: Hybrid Sync - Sliders (Independent) / Analysis Data (Shared from Mother)
   useEffect(() => {
     if (!selectedItemId) {
       // Background click -> Reset to default empty state
@@ -273,27 +274,24 @@ export default function App() {
     }
 
     const item = canvasItems.find(i => i.id === selectedItemId);
-    if (item) {
-      // V87: Information Pool (파생 이미지 선택 시에도 항상 최신 Mother 데이터 참조)
-      let targetParams = item.parameters;
-      if (item.type === 'generated' && item.motherId) {
-        const motherItem = canvasItems.find(i => i.id === item.motherId);
-        if (motherItem && motherItem.parameters) {
-          targetParams = motherItem.parameters;
-        }
-      }
+    const motherItem = (item?.type === 'generated' && item.motherId) 
+      ? canvasItems.find(i => i.id === item.motherId) 
+      : null;
 
-      if (targetParams) {
-        // Object-oriented state sync
-        setAngleIndex(targetParams.angleIndex);
-        setAltitudeIndex(targetParams.altitudeIndex);
-        setLensIndex(targetParams.lensIndex);
-        setTimeIndex(targetParams.timeIndex);
-        setAnalyzedOpticalParams(targetParams.analyzedOpticalParams || null);
-        setElevationParams(targetParams.elevationParams || null);
-        setSitePlanImage(targetParams.sitePlanImage || null);
-        setArchitecturalSheetImage(targetParams.architecturalSheetImage || null);
-      }
+    if (item && item.parameters) {
+      // 1. Viewpoint Sliders (Independent) -> Always from current item snapshot
+      setAngleIndex(item.parameters.angleIndex);
+      setAltitudeIndex(item.parameters.altitudeIndex);
+      setLensIndex(item.parameters.lensIndex);
+      setTimeIndex(item.parameters.timeIndex);
+
+      // 2. Analysis Data (Shared) -> Prefer Mother's analysis for consistency in the project
+      const analysisSource = motherItem?.parameters || item.parameters;
+      
+      setAnalyzedOpticalParams(analysisSource.analyzedOpticalParams || null);
+      setElevationParams(analysisSource.elevationParams || null);
+      setSitePlanImage(analysisSource.sitePlanImage || null);
+      setArchitecturalSheetImage(analysisSource.architecturalSheetImage || null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItemId]); // only trigger on selection change
@@ -1621,7 +1619,11 @@ ${layerC_property}
                                     {Object.entries(groupVal).map(([key, val]) => (
                                       <div key={key} className="flex justify-between items-start gap-2">
                                         <span className="opacity-60 capitalize whitespace-nowrap">{key.replace(/_/g, ' ')}</span>
-                                        <span className="text-right truncate flex-1">{String(val)}</span>
+                                        <span className="text-right truncate flex-1">
+                                          {typeof val === 'object' && val !== null 
+                                            ? JSON.stringify(val).replace(/["{}]/g, '').replace(/,/g, ', ') 
+                                            : String(val)}
+                                        </span>
                                       </div>
                                     ))}
                                   </div>
