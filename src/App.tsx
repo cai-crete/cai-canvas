@@ -938,10 +938,10 @@ export default function App() {
         });
         viewsToGenerate.push({
           name: "Detail View",
-          angle: "04:30 or 06:00 or 07:30 (Pick best for visibility)",
-          altitude: "1.6m (Eye Level) or 10m (Low Aerial)",
-          lens: "85mm (Short Telephoto Lens)",
-          distance: "approx 2m",
+          angle: "AI Optimal Selection (e.g., 06:00, 04:30 or 07:30)",
+          altitude: "AI Choice: 10m (Low Aerial) OR 50m (Mid Aerial)",
+          lens: "AI Choice: 85mm (Short Telephoto) OR 110mm (Macro)",
+          distance: "approx 2m~5m",
           scenario: "Detail / Close-up",
         });
       } else {
