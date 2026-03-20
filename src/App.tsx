@@ -273,16 +273,27 @@ export default function App() {
     }
 
     const item = canvasItems.find(i => i.id === selectedItemId);
-    if (item && item.parameters) {
-      // Object-oriented state sync
-      setAngleIndex(item.parameters.angleIndex);
-      setAltitudeIndex(item.parameters.altitudeIndex);
-      setLensIndex(item.parameters.lensIndex);
-      setTimeIndex(item.parameters.timeIndex);
-      setAnalyzedOpticalParams(item.parameters.analyzedOpticalParams || null);
-      setElevationParams(item.parameters.elevationParams || null);
-      setSitePlanImage(item.parameters.sitePlanImage || null);
-      setArchitecturalSheetImage(item.parameters.architecturalSheetImage || null);
+    if (item) {
+      // V87: Information Pool (파생 이미지 선택 시에도 항상 최신 Mother 데이터 참조)
+      let targetParams = item.parameters;
+      if (item.type === 'generated' && item.motherId) {
+        const motherItem = canvasItems.find(i => i.id === item.motherId);
+        if (motherItem && motherItem.parameters) {
+          targetParams = motherItem.parameters;
+        }
+      }
+
+      if (targetParams) {
+        // Object-oriented state sync
+        setAngleIndex(targetParams.angleIndex);
+        setAltitudeIndex(targetParams.altitudeIndex);
+        setLensIndex(targetParams.lensIndex);
+        setTimeIndex(targetParams.timeIndex);
+        setAnalyzedOpticalParams(targetParams.analyzedOpticalParams || null);
+        setElevationParams(targetParams.elevationParams || null);
+        setSitePlanImage(targetParams.sitePlanImage || null);
+        setArchitecturalSheetImage(targetParams.architecturalSheetImage || null);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedItemId]); // only trigger on selection change
@@ -1375,7 +1386,8 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                       </div>
                     )}
 
-                    {isGenerating && selectedItemId === item.id && (item.motherId === item.id || !item.motherId) && (
+                    {/* V87: Loader directly on the selected generating item */}
+                    {isGenerating && selectedItemId === item.id && (
                       <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/60 backdrop-blur-md pointer-events-auto">
                         <Loader2 className="animate-spin text-black w-12 h-12" />
                       </div>
