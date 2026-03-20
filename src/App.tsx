@@ -1396,8 +1396,14 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
 
                     {/* V87: Loader directly on the selected generating item */}
                     {isGenerating && selectedItemId === item.id && (
-                      <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
-                        <Loader2 className="animate-spin text-black/50 w-12 h-12" />
+                      <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/70 backdrop-blur-md pointer-events-auto">
+                        <Loader2 
+                          className="animate-spin text-black/70" 
+                          style={{ 
+                            width: `${48 / (canvasZoom / 100)}px`, 
+                            height: `${48 / (canvasZoom / 100)}px` 
+                          }}
+                        />
                       </div>
                     )}
                     {/* Corner Handles (Scale Invariant Circles, 4-corner resizable) */}
