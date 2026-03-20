@@ -754,7 +754,7 @@ export default function App() {
     // Note: In a real app, this would call an AI model to generate a top-down view.
     // For this simulation, we'll use the same API structure but with a specific site-plan prompt.
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
 
       const sitePlanPrompt = `
@@ -786,59 +786,71 @@ export default function App() {
       const base64Data = base64Image.split(',')[1];
       const mimeType = base64Image.split(';')[0].split(':')[1];
 
-      // Phase 2 (Sub-task): Multi-View Generation using gemini-3.1-flash-image-preview
-      const result = await ai.models.generateContent({
-        model: IMAGE_GEN,
-        contents: {
-          parts: [
-            { inlineData: { data: base64Data, mimeType: mimeType } },
-            { text: sitePlanPrompt },
-          ],
-        },
-      });
+      // Phase 2 (Sub-task): Multi-View Generation
+      const runGeneration = async (modelName: string) => {
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              { inlineData: { data: base64Data, mimeType: mimeType } },
+              { text: sitePlanPrompt },
+            ],
+          },
+        });
 
-      if (result.candidates?.[0]?.content?.parts) {
-        for (const part of result.candidates[0].content.parts) {
-          if (part.inlineData) {
-            const fullSheetData = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            setArchitecturalSheetImage(fullSheetData);
-            
-            // Extract TOP VIEW from the 3x3 cross layout grid
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement('canvas');
-              const cellW = img.width / 3;
-              const cellH = img.height / 3;
-              canvas.width = cellW;
-              canvas.height = cellH;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                // TOP View is at Row 0, Col 1
-                ctx.drawImage(img, cellW, 0, cellW, cellH, 0, 0, cellW, cellH);
-                const generatedSitePlan = canvas.toDataURL();
-                setSitePlanImage(generatedSitePlan);
+        if (result.candidates?.[0]?.content?.parts) {
+          for (const part of result.candidates[0].content.parts) {
+            if (part.inlineData) {
+              const fullSheetData = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+              setArchitecturalSheetImage(fullSheetData);
+              
+              // Extract TOP VIEW from the 3x3 cross layout grid
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const cellW = img.width / 3;
+                const cellH = img.height / 3;
+                canvas.width = cellW;
+                canvas.height = cellH;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  // TOP View is at Row 0, Col 1
+                  ctx.drawImage(img, cellW, 0, cellW, cellH, 0, 0, cellW, cellH);
+                  const generatedSitePlan = canvas.toDataURL();
+                  setSitePlanImage(generatedSitePlan);
 
-                if (itemId) {
-                  setCanvasItems(prev => prev.map(item => {
-                    if (item.id === itemId && item.parameters) {
-                      return {
-                        ...item,
-                        parameters: {
-                          ...item.parameters,
-                          architecturalSheetImage: fullSheetData,
-                          sitePlanImage: generatedSitePlan
-                        }
-                      };
-                    }
-                    return item;
-                  }));
+                  if (itemId) {
+                    setCanvasItems(prev => prev.map(item => {
+                      if (item.id === itemId && item.parameters) {
+                        return {
+                          ...item,
+                          parameters: {
+                            ...item.parameters,
+                            architecturalSheetImage: fullSheetData,
+                            sitePlanImage: generatedSitePlan
+                          }
+                        };
+                      }
+                      return item;
+                    }));
+                  }
                 }
-              }
-            };
-            img.src = fullSheetData;
-            break;
+              };
+              img.src = fullSheetData;
+              return true;
+            }
           }
         }
+        return false;
+      };
+
+      try {
+        const success = await runGeneration(IMAGE_GEN);
+        if (!success) throw new Error("No image data returned from primary model");
+      } catch (primaryError) {
+        console.warn(`Primary model (${IMAGE_GEN}) failed, retrying with fallback...`, primaryError);
+        const success = await runGeneration(IMAGE_GEN_FALLBACK);
+        if (!success) throw new Error("Fallback failed");
       }
     } catch (err) {
       console.warn("Multi-view generation failed", err);
