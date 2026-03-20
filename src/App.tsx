@@ -651,11 +651,15 @@ export default function App() {
       
       const analysisPrompt = `
         Analyze this architectural image.
-        [CRITICAL PRINCIPLE - MACRO-AEPL]
-        1. Identify the architectural Main Facade first (e.g., primary entrance, dominant windows, explicit front design).
-        2. Define this identified Main Facade as exactly "06:00" (Straight Front).
-        3. Do NOT confuse absolute North with the architectural front.
-        4. Output the estimated angle from which the photo was taken *relative* to this 06:00 anchoring.
+        [CRITICAL PRINCIPLE - CLOCK-FACE COORDINATE SYSTEM]
+        1. Identify the architectural Main Facade first.
+        2. Imagine looking down at a clock face drawn on the ground, with the building at the center. 
+        3. Define the virtual camera's coordinates based on this strictly mapped clock-face:
+           - 06:00 = Camera looking STRAIGHT AT the Main Facade (Primary_Facade).
+           - 03:00 = Camera looking at the Right Side (Right_Facade).
+           - 09:00 = Camera looking at the Left Side (Left_Facade).
+           - 12:00 = Camera looking at the Rear/Back (Rear_Facade).
+        4. Output the estimated angle (Where the camera is currently standing taking this photo) from the discrete options: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30.
         
         Return estimated parameters in JSON format:
         {

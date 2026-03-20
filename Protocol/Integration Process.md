@@ -90,13 +90,13 @@
     *   **Engine:** `gemini-3.1-flash-image-preview` (MODEL_IMAGE_GEN)
     *   **View Camera Map (뷰별 카메라 절대 좌표)**:
 
-| 뷰 | Azimuth | Altitude | 정방향 벡터 | 슬롯 ID |
-|---|---|---|---|---|
-| 정면 (Front) | 0° | 0° | (0, -1, 0) | Primary_Facade |
-| 탑/평면 (Top) | 0° | 90° | (0, 0, 1) | Top_Elevation |
-| 우측면 (Right) | 90° | 0° | (1, 0, 0) | Right_Facade |
-| 좌측면 (Left) | 270° | 0° | (-1, 0, 0) | Left_Facade |
-| 배면 (Back) | 180° | 0° | (0, 1, 0) | Rear_Facade |
+| 뷰 | Azimuth | Altitude | 정방향 벡터 | 시계판 좌표(Clock-face) | 슬롯 ID |
+|---|---|---|---|---|---|
+| 정면 (Front) | 0° | 0° | (0, -1, 0) | 06:00 | Primary_Facade |
+| 탑/평면 (Top) | 0° | 90° | (0, 0, 1) | Zenith | Top_Elevation |
+| 우측면 (Right) | 90° | 0° | (1, 0, 0) | 03:00 | Right_Facade |
+| 좌측면 (Left) | 270° | 0° | (-1, 0, 0) | 09:00 | Left_Facade |
+| 배면 (Back) | 180° | 0° | (0, 1, 0) | 12:00 | Rear_Facade |
 
     *   **Process**:
         *   `System Protocol B` (Node 3)를 가동하여 'Step 4'에서 합성 및 완성된 마스터 데이터를 기반으로 [Top, Front, Right, Rear, Left]가 포함된 **십자(Cross) 레이아웃 통합 건축 참조 시트**를 단일 패스로 생성.
@@ -142,7 +142,7 @@
     *   `{Macro-AEPS-V2}` **(거시적 파라미터 스키마)**: E-Series(외부/도시) 및 S-Series(대지 내부)의 형태(Geometry Master)와 속성(Property Slave)을 `ensemble_pair`로 조립하여 대지 및 환경 변수를 렌더링 시스템에 넘기는 파라미터 매뉴얼.
 
     **5-IVSP 3단계 실행 프로세스:**
-    *   **Phase 1: Coordinate Anchoring** — 사용자 슬라이더 입력(Angle, Altitude)을 **시계 방향 벡터**로 변환하고 Brown Point(관찰자)의 GPS 좌표 확정. (정면 Facade = 06:00 기준)
+    *   **Phase 1: Coordinate Anchoring** — 사용자 슬라이더 입력(Angle, Altitude)을 기준 방위가 고정된 **'시계판 좌표계(Clock-face Coordinates, 정면=06:00, 우측=03:00, 좌측=09:00, 배면=12:00)'**로 변환하고 Brown Point(관찰자)의 GPS 좌표 확정. (정면 Facade = 06:00 기준)
         *   **[정면 기준 전이]**: PHASE 2 Step 5에서 고정된 `Primary_Facade`(FRONT Elevation 슬롯)가 이 단계의 **06:00 원점(Origin)**으로 자동 전이됨. 절대 방위(North)가 아닌 건축물의 설계 정면이 기준.
     *   **Phase 2: Optical Engineering** — **Haversine 공식**으로 관찰자↔건축물 거리 계산 후 최적 렌즈(mm) 및 퍼스펙티브 자동 선택. 정면=1-Point, 코너=2-Point Perspective.
     *   **Phase 3: Layering Execution** — 확정된 좌표에 재질(Material Injection) 및 광학 레이어 적용. 비가시권(Rear/Side) 이동 시 `protocol-Blind Spot Inference` 엔진 자동 가동.

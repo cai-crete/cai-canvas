@@ -79,9 +79,14 @@ The system operates through four organic layers to simulate the viewpoint of a c
 
 ## 6. EXECUTION PROCESS: 3-Phase Simulation
 **Mode: Intuition-to-Coordinate Translation**
-### Phase 1. Coordinate Anchoring
-Translate user intuition (Clock Direction) into a relative vector based on the **5-Point Matrix**.
-* **Relative Definition:** Set the Building Facade as **06:00**.
+### Phase 1. Coordinate Anchoring (Clock-face Coordinates)
+Translate user intuition into a relative vector based on the **5-Point Matrix** and the **Clock-face Coordinate System**.
+* **Clock-face Constants:**
+  * **06:00:** Front (Primary_Facade)
+  * **03:00:** Right Side (Right_Facade)
+  * **09:00:** Left Side (Left_Facade)
+  * **12:00:** Rear / Back (Rear_Facade)
+* **Relative Definition:** Align the 'Primary_Facade' slot to the exact **06:00** origin.
 * **Vector Calculation:** Convert input (e.g., "Right") to Vector (03:00).
 * **Goal:** Fix the precise GPS coordinates and Altitude of the 'Brown Point'.
 
