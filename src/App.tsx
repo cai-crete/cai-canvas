@@ -606,11 +606,12 @@ export default function App() {
           let newX = -img.width / 2;
           
           if (canvasItems.length > 0) {
-            const bottomMostItem = canvasItems.reduce((prev, current) => 
-              (prev.y + prev.height > current.y + current.height) ? prev : current
+            const leftMostItem = canvasItems.reduce((prev, current) => 
+              (prev.x < current.x) ? prev : current
             );
-            newY = bottomMostItem.y + bottomMostItem.height + 40;
-            newX = bottomMostItem.x; // Align with the bottom-most item's X
+            // Place to the left of the leftmost item
+            newX = leftMostItem.x - img.width - 40;
+            newY = leftMostItem.y;
           }
 
           const newItem: CanvasItem = {
@@ -1466,7 +1467,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                           return (
                             <button 
                               onClick={handleGenerate}
-                              disabled={isGenerating}
+                              disabled={isGenerating || activeTab === 'result'}
                               className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[16px] flex items-center justify-center"
                             >
                               <span className={`block transition-opacity ${isGenerating ? 'opacity-0' : 'opacity-100'}`}>Generate</span>
