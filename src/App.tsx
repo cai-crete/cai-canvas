@@ -935,8 +935,8 @@ export default function App() {
           scenario: "Street View",
         });
         viewsToGenerate.push({
-          name: "Detail View",
-          angle: "AI Choice: Side Angle (e.g., 09:00, 03:00, 07:30, 04:30) to show the facade on the left or right side",
+          name: "Street View",
+          angle: "AI Choice: 04:30 OR 07:30 (Select optimal visible corner based on 06:00)",
           altitude: "1.6m (Street level)",
           lens: "AI Choice: 35mm (Wide Standard) OR 45mm (Standard)",
           distance: "approx 2m~5m",
@@ -1080,9 +1080,20 @@ ${layerC_property}
                   const img = new Image();
                   img.onload = () => {
                     // V109: Reverse-lookup exact indices from viewConfig to snapshot each image's true params
-                    const snapAngleIndex = Math.max(0, ANGLES.findIndex(a => viewConfig.angle.startsWith(a)));
+                    let snapAngleIndex = Math.max(0, ANGLES.findIndex(a => viewConfig.angle.startsWith(a)));
+                    if (viewConfig.name === "Street View") {
+                      // V111: Explicit index matching for Street View since prompt is "AI Choice..."
+                      const baseAngle = v0_angle === 'Unknown' ? '06:00' : v0_angle;
+                      const cornerAngle = getAngle(baseAngle);
+                      snapAngleIndex = Math.max(0, ANGLES.findIndex(a => a === cornerAngle));
+                    }
+
                     const snapLensIndex  = Math.max(0, LENSES.findIndex(l => viewConfig.lens.includes(String(l.value))));
-                    const snapAltIndex   = Math.max(0, ALTITUDES.findIndex(a => viewConfig.altitude.includes(String(a.value))));
+                    
+                    // V111: Robust parsing for altitude using regex to avoid partial matches (e.g. 150m matching 0m)
+                    const altMatch = viewConfig.altitude.match(/^(-?\d+(\.\d+)?)m/);
+                    const altValue = altMatch ? parseFloat(altMatch[1]) : 1.6;
+                    const snapAltIndex = Math.max(0, ALTITUDES.findIndex(a => a.value === altValue));
 
                     const newGenItem: CanvasItem = {
                       id: `gen-${Date.now()}-${Math.floor(Math.random()*1000)}`,
