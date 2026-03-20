@@ -1314,7 +1314,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                   >
                     {/* V80/V81: Floating Control Bar for All Images */}
                     <div 
-                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 rounded-2xl shadow-sm ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 border border-black/50 dark:border-white/50 rounded-2xl shadow-sm ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
                       style={{
                         top: `-${48 / (canvasZoom / 100)}px`, // 36px height + 12px padding scaled inversely
                         right: 0,
