@@ -1410,6 +1410,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                         height: size,
                         borderWidth: 1.6 * s,
                         position: 'absolute',
+                        zIndex: 60,
                         backgroundColor: 'white',
                         borderColor: '#808080',
                         borderRadius: '999px',
