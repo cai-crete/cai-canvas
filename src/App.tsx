@@ -1393,7 +1393,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                     {/* V87: Loader directly on the selected generating item */}
                     {isGenerating && selectedItemId === item.id && (
                       <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
-                        <Loader2 className="animate-spin text-black w-12 h-12" />
+                        <Loader2 className="animate-spin text-black/50 w-12 h-12" />
                       </div>
                     )}
                     {/* Corner Handles (Scale Invariant Circles, 4-corner resizable) */}
@@ -1472,7 +1472,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                               disabled={isGenerating || activeTab === 'result'}
                               className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[16px] flex items-center justify-center"
                             >
-                              <span className="block">{isGenerating ? 'GENERATING' : 'GENERATE'}</span>
+                              <span className="block">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
                             </button>
                           );
                         }
