@@ -1318,7 +1318,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                   >
                     {/* V80/V81: Floating Control Bar for All Images */}
                     <div 
-                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 border border-black/40 dark:border-white/40 rounded-2xl shadow-sm ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 border border-black/40 dark:border-white/40 rounded-2xl shadow-sm pointer-events-auto`}
                       style={{
                         top: `-${48 / (canvasZoom / 100)}px`, // 36px height + 12px padding scaled inversely
                         right: 0,
@@ -1392,7 +1392,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
 
                     {/* V87: Loader directly on the selected generating item */}
                     {isGenerating && selectedItemId === item.id && (
-                      <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/60 backdrop-blur-md pointer-events-auto">
+                      <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
                         <Loader2 className="animate-spin text-black w-12 h-12" />
                       </div>
                     )}
@@ -1451,7 +1451,8 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                     <div className="flex items-stretch h-[36px] border border-black dark:border-white rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
                       <button 
                         onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
-                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-r border-black/10 dark:border-white/10 flex items-center justify-center"
+                        disabled={!selectedItemId}
+                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-r border-black/10 dark:border-white/10 flex items-center justify-center disabled:opacity-20 disabled:cursor-not-allowed"
                         title="Toggle View"
                       >
                         <ChevronLeft size={16} />
@@ -1471,12 +1472,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                               disabled={isGenerating || activeTab === 'result'}
                               className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[16px] flex items-center justify-center"
                             >
-                              <span className={`block transition-opacity ${isGenerating ? 'opacity-0' : 'opacity-100'}`}>Generate</span>
-                              {isGenerating && (
-                                <span className="absolute inset-0 flex items-center justify-center">
-                                  <Loader2 size={14} className="animate-spin" />
-                                </span>
-                              )}
+                              <span className="block">{isGenerating ? 'GENERATING' : 'GENERATE'}</span>
                             </button>
                           );
                         }
@@ -1493,7 +1489,8 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
 
                       <button 
                         onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
-                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-l border-black/10 dark:border-white/10 flex items-center justify-center"
+                        disabled={!selectedItemId}
+                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-l border-black/10 dark:border-white/10 flex items-center justify-center disabled:opacity-20 disabled:cursor-not-allowed"
                         title="Toggle View"
                       >
                         <ChevronRight size={16} />
