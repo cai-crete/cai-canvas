@@ -631,7 +631,7 @@ export default function App() {
     setIsAnalyzing(true);
     try {
       // Phase 1 & 2: Structural & Viewpoint Analysis using gemini-3.1-pro-preview
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       const analysisPrompt = `
         Analyze this architectural image.
@@ -754,7 +754,7 @@ export default function App() {
     // Note: In a real app, this would call an AI model to generate a top-down view.
     // For this simulation, we'll use the same API structure but with a specific site-plan prompt.
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
 
       const sitePlanPrompt = `
@@ -874,7 +874,7 @@ export default function App() {
 
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       const currentAngle = ANGLES[angleIndex];
       const currentAltitude = ALTITUDES[altitudeIndex];
