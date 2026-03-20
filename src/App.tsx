@@ -1317,7 +1317,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                   >
                     {/* V80/V81: Floating Control Bar for All Images */}
                     <div 
-                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 border border-black/50 dark:border-white/50 rounded-2xl shadow-sm ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 border border-black/40 dark:border-white/40 rounded-2xl shadow-sm ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
                       style={{
                         top: `-${48 / (canvasZoom / 100)}px`, // 36px height + 12px padding scaled inversely
                         right: 0,
@@ -1458,7 +1458,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                       {(() => {
                         const selItem = canvasItems.find(i => i.id === selectedItemId);
                         if (!selItem) return (
-                          <div className="flex-1 font-display tracking-widest uppercase text-center opacity-30 text-[11px] flex items-center justify-center">
+                          <div className="flex-1 font-display tracking-widest uppercase text-center opacity-30 text-[16px] flex items-center justify-center">
                             Select Image
                           </div>
                         );
@@ -1467,7 +1467,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                             <button 
                               onClick={handleGenerate}
                               disabled={isGenerating}
-                              className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[11px] flex items-center justify-center"
+                              className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[16px] flex items-center justify-center"
                             >
                               <span className={`block transition-opacity ${isGenerating ? 'opacity-0' : 'opacity-100'}`}>Generate</span>
                               {isGenerating && (
@@ -1482,9 +1482,9 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                           <button 
                             onClick={() => analyzeViewpoint(selItem.src, selItem.id)}
                             disabled={isAnalyzing}
-                            className="flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30 font-medium text-[11px] flex items-center justify-center"
+                            className="flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30 font-medium text-[16px] flex items-center justify-center"
                           >
-                            {isAnalyzing ? 'Analyzing...' : 'Analysis'}
+                            {isAnalyzing ? 'Analyzing...' : 'Analyze'}
                           </button>
                         );
                       })()}
@@ -1542,9 +1542,6 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1">
-                    <div className="flex justify-between items-center mb-1">
-                      <h3 className="text-xl font-display uppercase tracking-widest leading-none">Analysis Report</h3>
-                    </div>
                     <div className="font-mono text-xs leading-normal tracking-widest space-y-4">
                       {/* V89: Viewpoint details (SCENARIO, ANGLE, ALTITUDE, PROMPT) removed from Report View */}
                       {/* V80: PHASE 3 Detailed Parameters Rendering */}
