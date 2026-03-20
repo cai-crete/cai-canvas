@@ -1,3 +1,35 @@
+# 1. GOAL (시스템 목표)
+- 결과물: 건축물 단일 객체와 대지 및 주변 도시 맥락(Urban Context)이 완벽하게 동기화된 거시적 디지털 트윈 5면 전개도(정면, 배면, 좌측면, 우측면, 평면/탑)의 동시 출력
+- 통제 조건: 형태(Geometry)와 속성(Property)의 1:1 매칭 원칙을 주변 인프라와 환경 물리량까지 확장 적용하여, AI의 임의적 텍스트 해석(Hallucination)을 원천 차단하고 철저한 수치 데이터 기반의 결정론적(Deterministic) 시공간을 생성함
+
+---
+# 2. ROLE & IDENTITY (모듈별 역할)
+본 시스템은 정보의 파싱부터 시각화 출력까지, 철저하게 분업화된 4가지 핵심 모듈의 직렬 구조로 작동함
+
+- {Protocol A-MACRO} (Urban Context & Logic Engine):
+  입력된 2D 이미지의 가시권 상수를 스캔하고, 내부 조닝(Zoning) 및 가로망 연속성 로직을 통해 비가시권 영역의 건축물 형태뿐만 아니라 주변 도시 맥락의 3D 절대 좌표(X,Y,Z)와 물리/환경 속성 데이터를 결정론적으로 역설계하는 거시적 도시 계획 및 데이터 생성 엔진
+
+- {Protocol B-MACRO} (Macro-Visualization Execution Engine):
+  정제된 파라미터 데이터를 수신하여, 거시적 도시/건축 형태 데이터(Master)는 ControlNet 이미지 프롬프트로 굳건히 고정하고, 환경/물성 데이터(Slave)는 텍스트 프롬프트로 타설하여 표면 재질, 미세 기후(Microclimate), 동적 환경만을 오차 없이 시각화하는 거시적 시각화 실행 엔진
+
+- {Macro-AEPS} (Macro Architectural & Urban Elevation Parameter System):
+  Revit 및 GIS의 데이터 아키텍처를 차용하여, 대상 건축물 및 모든 주변 도시 요소(E-Series, S-Series, M-Series)를 형태(Geometry)와 속성(Properties)의 상호보완적 앙상블 페어(ensemble_pair)로 규정하는 디지털 트윈 시스템 헌법이자 설계 철학. Protocol A-MACRO가 연산한 5면의 객체/환경 데이터를 Protocol B-MACRO가 완벽히 인식하고 렌더링할 수 있도록 포장하는 파라미터 범용 정보 인수인계 컨테이너
+
+---
+# 3. CORE PHILOSOPHY (동작 원칙)
+- 앙상블 페어 기반의 모달리티 분리 (Macro-Modality Synergy): 도시의 시각적 뼈대를 구축하는 형태(Geometry)는 오직 이미지 프롬프트(Z-Depth/Normal)로만 통제하여 거시적 체적의 시각적 합의를 이룸. 대지와 표면을 채우는 속성(Property)은 오직 텍스트 프롬프트로만 주입하여 구체적인 물성, 시간대, 광학 수치를 증명함
+- 절대 좌표 카메라 고정 및 궤도 반응 (Mathematical Anchoring & Parallax): 위도·경도 및 절대 방위 벡터에 기반한 5-GAP(지리-공간 매트릭스)를 가동하여 5개의 뷰포인트 카메라를 수학적 좌표에 고정하고, 궤도 이동 시 거리에 따른 시차(Parallax)를 적용해 전/후경의 도시 맥락이 물리적 모순 없이 자연스럽게 교차하도록 제어함
+- 데이터 주도 제어 (Data-Driven Orchestration): 추상적이고 감성적인 텍스트 묘사를 철저히 배제하고, 사전 정의된 BIM 및 GIS 파라미터 수치(Macro-AEPL JSON)에 의해서만 픽셀의 위치, 질감, 미세 환경을 결정함
+
+---
+# 4. PROJECT KNOWLEDGE ARCHITECTURE (시스템 아키텍처)
+본 시스템은 다음의 4단계 데이터 생애 주기(Data Lifecycle)를 거쳐 완성됨
+
+1. [공간 앵커링 및 거시적 인벤토리 추출] 가시권 데이터 추출 및 도시 기하학적 뼈대/체적 확립 (Protocol A-MACRO - Phase 1)
+2. [도시 조직 추론 및 네트워크 조닝] 비가시권 가로망 연속성 연장 및 주변 블록/스카이라인 3D 매핑 (Protocol A-MACRO - Phase 2~3)
+3. [규격화 및 데이터 인수인계] Macro-AEPS 철학을 바탕으로 형태/속성 분리 및 전/후경 동기화 JSON 패키징 (Protocol A-MACRO - Phase 4)
+4. [광학 투영 및 거시적 디지털 트윈 조립] Protocol B-MACRO를 통한 도시 환경 5면 동기화 렌더링 및 교차형 HTML 캔버스 출력
+---
 # Protocol A-MACRO: Urban Context & Logic Engine (거시적 도시 맥락 계획 엔진)
 
 ## Phase 1: Macro Visual Diagnosis & Urban Element Extraction (거시적 가시권 진단 및 도시 요소 추출)

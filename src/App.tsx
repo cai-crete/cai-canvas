@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Download } from 'lucide-react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 
@@ -646,8 +646,11 @@ export default function App() {
       
       const analysisPrompt = `
         Analyze this architectural image.
-        [CRITICAL PRINCIPLE] Absolute geographical orientation is ignored. The building's main facade (front) is ALWAYS considered the relative "06:00" vector. 
-        Analyze the viewpoint based on this 06:00 anchoring.
+        [CRITICAL PRINCIPLE - MACRO-AEPL]
+        1. Identify the architectural Main Facade first (e.g., primary entrance, dominant windows, explicit front design).
+        2. Define this identified Main Facade as exactly "06:00" (Straight Front).
+        3. Do NOT confuse absolute North with the architectural front.
+        4. Output the estimated angle from which the photo was taken *relative* to this 06:00 anchoring.
         
         Return estimated parameters in JSON format:
         {
@@ -1441,18 +1444,59 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                 {/* Sidebar Content Wrapper */}
                 <div className={`flex flex-col h-full overflow-y-auto transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
                 
-                  {/* V81: Dots Navigation Top Bar */}
-                  <div className="flex justify-center items-center gap-2 pt-6 pb-2">
-                    <button 
-                      onClick={() => setActiveTab('create')}
-                      className={`w-2 h-2 rounded-full transition-all duration-300 ${activeTab === 'create' ? 'bg-black dark:bg-white scale-125' : 'bg-black/20 dark:bg-white/20 hover:bg-black/40 dark:hover:bg-white/40'}`}
-                      title="Parameter View"
-                    />
-                    <button 
-                      onClick={() => setActiveTab('result')}
-                      className={`w-2 h-2 rounded-full transition-all duration-300 ${activeTab === 'result' ? 'bg-black dark:bg-white scale-125' : 'bg-black/20 dark:bg-white/20 hover:bg-black/40 dark:hover:bg-white/40'}`}
-                      title="Report View"
-                    />
+                  {/* V89: Dots Navigation Replaced by Action Buttons */}
+                  <div className="pt-5 pb-1 px-5">
+                    <div className="flex items-stretch border border-black dark:border-white rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+                      <button 
+                        onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
+                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-r border-black/10 dark:border-white/10 flex items-center justify-center"
+                        title="Toggle View"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+
+                      {(() => {
+                        const selItem = canvasItems.find(i => i.id === selectedItemId);
+                        if (!selItem) return (
+                          <div className="flex-1 py-1.5 font-display tracking-widest uppercase text-center opacity-30 text-[11px] flex items-center justify-center">
+                            Select Image
+                          </div>
+                        );
+                        if (selItem.parameters?.analyzedOpticalParams || selItem.type === 'generated') {
+                          return (
+                            <button 
+                              onClick={handleGenerate}
+                              disabled={isGenerating}
+                              className="relative flex-1 py-1.5 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[11px]"
+                            >
+                              <span className={`block transition-opacity ${isGenerating ? 'opacity-0' : 'opacity-100'}`}>Generate</span>
+                              {isGenerating && (
+                                <span className="absolute inset-0 flex items-center justify-center">
+                                  <Loader2 size={14} className="animate-spin" />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        }
+                        return (
+                          <button 
+                            onClick={() => analyzeViewpoint(selItem.src, selItem.id)}
+                            disabled={isAnalyzing}
+                            className="flex-1 py-1.5 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30 font-medium text-[11px]"
+                          >
+                            {isAnalyzing ? 'Analyzing...' : 'Analysis'}
+                          </button>
+                        );
+                      })()}
+
+                      <button 
+                        onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
+                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-l border-black/10 dark:border-white/10 flex items-center justify-center"
+                        title="Toggle View"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
                   </div>
                 
                 {activeTab === 'create' ? (
@@ -1502,25 +1546,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                       <h3 className="text-xl font-display uppercase tracking-widest leading-none">Analysis Report</h3>
                     </div>
                     <div className="font-mono text-xs leading-normal tracking-widest space-y-4">
-                      <div>
-                        <span className="opacity-50 block mb-1">SCENARIO</span>
-                        <span>{determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value)}</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="opacity-50 block mb-1">ANGLE</span>
-                          <span>{ANGLES[angleIndex]}</span>
-                        </div>
-                        <div>
-                          <span className="opacity-50 block mb-1">ALTITUDE</span>
-                          <span>{ALTITUDES[altitudeIndex].label}</span>
-                        </div>
-                      </div>
-                      <div>
-                        <span className="opacity-50 block mb-1">PROMPT</span>
-                        <span className="leading-tight block">{prompt || 'Logical inference based on architectural DNA.'}</span>
-                      </div>
-
+                      {/* V89: Viewpoint details (SCENARIO, ANGLE, ALTITUDE, PROMPT) removed from Report View */}
                       {/* V80: PHASE 3 Detailed Parameters Rendering */}
                       {elevationParams && typeof elevationParams === 'object' && (
                         <div className="mt-6 border-t border-black/10 dark:border-white/10 pt-4 space-y-4">
@@ -1549,38 +1575,9 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                   </div>
                 )}
 
-                {/* BOTTOM ACTION */}
+                {/* BOTTOM FOOTER */}
                 <div className="p-5 mt-auto border-t border-black/10 dark:border-white/10">
-                  {(() => {
-                    const selItem = canvasItems.find(i => i.id === selectedItemId);
-                    if (!selItem) return null;
-                    if (selItem.parameters?.analyzedOpticalParams || selItem.type === 'generated') {
-                      return (
-                        <button 
-                          onClick={handleGenerate}
-                          disabled={isGenerating}
-                          className="relative w-full border border-black dark:border-white py-2 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <span className={`block transition-opacity ${isGenerating ? 'opacity-0' : 'opacity-100'}`}>Generate</span>
-                          {isGenerating && (
-                            <span className="absolute inset-0 flex items-center justify-center">
-                              <Loader2 size={18} className="animate-spin" />
-                            </span>
-                          )}
-                        </button>
-                      );
-                    }
-                    return (
-                      <button 
-                        onClick={() => analyzeViewpoint(selItem.src, selItem.id)}
-                        disabled={isAnalyzing}
-                        className="w-full border border-black dark:border-white py-2 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30"
-                      >
-                        {isAnalyzing ? 'Analyzing...' : 'Analysis'}
-                      </button>
-                    );
-                  })()}
-                  <p className="font-mono text-[9px] opacity-40 text-center mt-4 tracking-tighter">
+                  <p className="font-mono text-[9px] opacity-40 text-center tracking-tighter">
                     © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
                   </p>
                 </div>
