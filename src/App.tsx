@@ -609,9 +609,13 @@ export default function App() {
             const leftMostItem = canvasItems.reduce((prev, current) => 
               (prev.x < current.x) ? prev : current
             );
-            // Place to the left of the leftmost item
-            newX = leftMostItem.x - img.width - 40;
-            newY = leftMostItem.y;
+            const bottomMostItem = canvasItems.reduce((prev, current) => 
+              (prev.y + prev.height > current.y + current.height) ? prev : current
+            );
+            
+            // Place below the bottom-most item, aligned to the leftmost X
+            newX = leftMostItem.x;
+            newY = bottomMostItem.y + bottomMostItem.height + 40;
           }
 
           const newItem: CanvasItem = {
