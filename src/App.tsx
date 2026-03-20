@@ -938,7 +938,7 @@ export default function App() {
         });
         viewsToGenerate.push({
           name: "Detail View",
-          angle: cornerAngle,
+          angle: "06:00",
           altitude: "10m (Low Aerial View)",
           lens: "110mm Macro Lens",
           distance: "approx 10m",
