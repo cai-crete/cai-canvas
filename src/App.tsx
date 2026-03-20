@@ -1571,7 +1571,7 @@ ${layerC_property}
                       />
                     </div>
                     
-                    <div className={`flex flex-col mt-2 space-y-5 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
+                    <div className={`flex flex-col mt-2 space-y-3 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
                       {/* Controls */}
                       <div>
                         <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
