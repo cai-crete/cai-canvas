@@ -138,23 +138,28 @@
     *   `{protocol-5_Point}` **(실행 엔진)**: 직관→좌표 변환, 5-Point Matrix 벡터 계산, 최적 렌즈/퍼스펙티브 자동 선택.
     *   `{Viewpoint Analysis 1 & 2}` **(시각 사전)**: 수직 사전(고도/수평선 관계), 수평 사전(방향 로직/볼륨 제어) 정의.
     *   `{protocol-Blind Spot Inference}` **(추론 엔진)**: 비가시권 설계 DNA 연장, 내부 기능(주거/사무) 역추론으로 코어 위치 및 후면 창호/도어 배치 결정.
+    *   `{Protocol A,B-MACRO-V1}` **(도시 맥락 엔진)**: 가시권 진단 및 비가시권(사각지대)의 배경/전경 물리 환경 구축, 동적 시차(Parallax) 대응 등 시점 변경 시 대지에 대한 거시적 뼈대와 규칙을 제공함.
+    *   `{Macro-AEPS-V2}` **(거시적 파라미터 스키마)**: E-Series(외부/도시) 및 S-Series(대지 내부)의 형태(Geometry Master)와 속성(Property Slave)을 `ensemble_pair`로 조립하여 대지 및 환경 변수를 렌더링 시스템에 넘기는 파라미터 매뉴얼.
 
     **5-IVSP 3단계 실행 프로세스:**
     *   **Phase 1: Coordinate Anchoring** — 사용자 슬라이더 입력(Angle, Altitude)을 **시계 방향 벡터**로 변환하고 Brown Point(관찰자)의 GPS 좌표 확정. (정면 Facade = 06:00 기준)
         *   **[정면 기준 전이]**: PHASE 2 Step 5에서 고정된 `Primary_Facade`(FRONT Elevation 슬롯)가 이 단계의 **06:00 원점(Origin)**으로 자동 전이됨. 절대 방위(North)가 아닌 건축물의 설계 정면이 기준.
     *   **Phase 2: Optical Engineering** — **Haversine 공식**으로 관찰자↔건축물 거리 계산 후 최적 렌즈(mm) 및 퍼스펙티브 자동 선택. 정면=1-Point, 코너=2-Point Perspective.
     *   **Phase 3: Layering Execution** — 확정된 좌표에 재질(Material Injection) 및 광학 레이어 적용. 비가시권(Rear/Side) 이동 시 `protocol-Blind Spot Inference` 엔진 자동 가동.
+        > **[!IMPORTANT] 대지 매크로 프로토콜 가동**
+        > 카메라 시점 궤도 이동 시, 대상 건축물뿐만 아니라 **'대지에 대한 프로토콜 (Macro Urban/Site Context)'**이 철저히 동반 작동합니다. 
+        > `Protocol A,B-MACRO-V1` (도시 맥락 엔진)의 법칙에 따라 가로망과 인접 건물의 시차(Parallax)가 동기화되며, `Macro-AEPS-V2` 스키마를 통해 1_Geometry_Data(대지 형태)와 2_Property_Data(환경 속성)가 결합되어 비가시권 배경을 완벽히 재조립해 냅니다.
 
 
     **Protocol B 물성 위계 조립 (5면 전개도 렌더링 시):**
     *   사용자가 조정한 **광학/시점 파라미터** (Angle 01:30, Altitude 45deg, 85mm 등) 결합.
     *   Phase 2에서 메모리에 숨겨둔 **건축 입면 파라미터** (Exposed Concrete, Punch Window 등)를 호출하여 Step 5: Structural & Material Parameters로 강제 주입.
     *   **B-1. Geometry Master Locking (형태 고정)**:
-        *   5개 뷰 시퀀스를 순회하며 `1_Geometry_Data_MASTER`에서 절대 수치 추출.
-        *   재질 연산이 보류된 순수 3D 화이트박스 메쉬 자동 생성 후, Z-Depth / Surface Normal / 3-Tier Line 3종 레퍼런스 맵 추출.
+        *   5개 뷰 시퀀스를 순회하며 건축물뿐만 아니라 Macro-AEPS-V2의 E-Series/S-Series를 포괄하는 `1_Geometry_Data_MASTER`에서 절대 수치 추출.
+        *   재질 연산이 보류된 순수 3D 화이트박스 메쉬(도시 맥락 포함) 자동 생성 후, Z-Depth / Surface Normal / 3-Tier Line 3종 레퍼런스 맵 추출.
         *   ControlNet에 최대 가중치(1.0)로 적용하여 픽셀의 절대 좌표 시스템에 고정.
     *   **B-2. Property Slave Injection (속성 주입)**:
-        *   `2_Property_Data_SLAVE`만 활용하여 PBR 물성(알베도, 거칠기, 반사율), 유리 굴절/투과율, AO 그림자, 표면 풍화 레벨 등 3단계 물성 위계 텍스트 프롬프트 조립.
+        *   건축물 물성과 Macro-AEPS-V2 환경 속성을 결합한 `2_Property_Data_SLAVE`만 활용하여 PBR 물성(알베도, 거칠기, 반사율), 유리 굴절/투과율, AO 그림자, 표면 풍화 레벨 등 3단계 물성 위계 텍스트 프롬프트 조립.
         *   텍스트 내 형태를 암시하는 단어를 배제하여, 이미지 프롬프트가 확정한 기하학적 뼈대를 보호.
     *   **B-3. Dynamic AO 설정**: 도시 맥락 파라미터를 통합 적용하여 동적 환경광 차폐(Dynamic AO) 기본 강도 설정.
 
