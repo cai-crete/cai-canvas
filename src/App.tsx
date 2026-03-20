@@ -895,70 +895,123 @@ export default function App() {
       return;
     }
 
+    // V102: Check if this is the first generation for this mother image
+    const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === sourceItem.id || (i.motherId === undefined && i.id === sourceItem.id)));
+    const isFirstTime = sourceItem.type === 'upload' && !hasInitialViews;
+
     setIsGenerating(true);
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
-      const currentAngle = ANGLES[angleIndex];
-      const currentAltitude = ALTITUDES[altitudeIndex];
-      const currentLens = LENSES[lensIndex];
-      const currentTime = TIMES[timeIndex];
-
-      const scenario = determineScenario(currentAngle, currentAltitude.value, currentLens.value);
-
-      // [PHASE 4 - Step 2] Unified Prompt Assembly
-      // Layer B: 5-IVSP Phase 1 (Coordinate Anchoring) + Phase 2 (Optical Engineering)
-      // V₀: AI-analyzed source viewpoint (from PHASE 1 analyzeViewpoint)
       const v0_angle    = analyzedOpticalParams?.angle    || 'Unknown';
       const v0_altitude = analyzedOpticalParams?.altitude || 'Unknown';
       const v0_lens     = analyzedOpticalParams?.lens     || 'Unknown';
       const v0_time     = analyzedOpticalParams?.time     || 'Unknown';
 
-      const layerB_viewpoint = `
+      const getAngle = (base: string) => {
+        if (['07:30', '09:00', '10:30'].includes(base)) return '07:30';
+        return '04:30';
+      };
+
+      const viewsToGenerate = [];
+
+      if (isFirstTime) {
+        const baseAngle = v0_angle === 'Unknown' ? '06:00' : v0_angle;
+        const cornerAngle = getAngle(baseAngle);
+        const perspectiveAngle = baseAngle === '06:00' ? cornerAngle : '06:00';
+        
+        viewsToGenerate.push({
+          name: "Bird's Eye View",
+          angle: cornerAngle,
+          altitude: "150m (Bird's eye view)",
+          lens: "32mm Aerial Lens",
+          distance: "approx 200m",
+          scenario: "Aerial / Bird's eye",
+        });
+        viewsToGenerate.push({
+          name: "Perspective View",
+          angle: perspectiveAngle,
+          altitude: "1.6m (Street level)",
+          lens: "24mm Wide or 23mm Tilt-Shift Lens (Choose best)",
+          distance: "Standard",
+          scenario: "Street View",
+        });
+        viewsToGenerate.push({
+          name: "Detail View",
+          angle: cornerAngle,
+          altitude: "10m (Low Aerial View)",
+          lens: "110mm Macro Lens",
+          distance: "approx 10m",
+          scenario: "Detail / Close-up",
+        });
+      } else {
+        viewsToGenerate.push({
+          name: "Custom View",
+          angle: ANGLES[angleIndex],
+          altitude: ALTITUDES[altitudeIndex].label,
+          lens: LENSES[lensIndex].label,
+          distance: "Standard",
+          scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
+        });
+      }
+
+      let actualImageSrc = sourceItem.src;
+      // V82: If generating from a generated image, we MUST use the mother image's src for the AI!
+      if (sourceItem.type === 'generated' && sourceItem.motherId) {
+        const motherItem = canvasItems.find(i => i.id === sourceItem.motherId);
+        if (motherItem) {
+          actualImageSrc = motherItem.src;
+        }
+      }
+
+      const base64Data = actualImageSrc.split(',')[1];
+      const mimeType = actualImageSrc.split(';')[0].split(':')[1];
+
+      for (const viewConfig of viewsToGenerate) {
+        const currentTime = TIMES[timeIndex];
+
+        const layerB_viewpoint = `
 # ACTION PROTOCOL (MANDATORY EXECUTION WORKFLOW)
 ## Pre-Step: Reality Anchoring & Camera Delta Calculation
 - V₀ (Current Camera Position — AI Reverse-Engineered):
     Angle: ${v0_angle} o'clock | Altitude: ${v0_altitude} | Lens: ${v0_lens} | Time: ${v0_time}
     This is the exact camera position from which the SOURCE IMAGE (IMAGE 1) was captured.
 - V₁ (Target Camera Position — User Command):
-    Angle: ${currentAngle} o'clock | Altitude: ${currentAltitude.label} | Lens: ${currentLens.label} | Time: ${currentTime}
-- Δ Movement Vector: Orbit from ${v0_angle} → ${currentAngle} | Altitude change: ${v0_altitude} → ${currentAltitude.label}
+    Angle: ${viewConfig.angle} o'clock | Altitude: ${viewConfig.altitude} | Lens: ${viewConfig.lens} | Time: ${currentTime}
+- Δ Movement Vector: Orbit from ${v0_angle} → ${viewConfig.angle} | Altitude change: ${v0_altitude} → ${viewConfig.altitude}
     Execute this as a precise Physical Camera Orbit around the immutable building geometry.
 
 ## Step 1: Coordinate Anchoring & Vector Calculation
 - Reference: Building main facade fixed at 06:00 (Front).
-- Target Vector: ${currentAngle}
-- Altitude: ${currentAltitude.label}
+- Target Vector: ${viewConfig.angle}
+- Altitude: ${viewConfig.altitude}
 
 ## Step 2: Scenario Mapping & Optical Engineering
-- Scenario: ${scenario}
-- Lens: ${currentLens.label}
+- Scenario: ${viewConfig.scenario}
+- Lens: ${viewConfig.lens}
 - Time of Day: ${currentTime}`;
 
-      // Layer C: PHASE 2 Property Slave Injection (elevationParams)
-      const layerC_property = elevationParams 
-        ? `
+        const layerC_property = elevationParams 
+          ? `
 ## Step 5: Structural & Material Parameters (PHASE 2 AEPL Data — Immutable)
 - Mass Typology: ${elevationParams.mass_typology || 'N/A'}
 - Core Typology: ${elevationParams.core_typology || 'N/A'}
 - Base Material: ${elevationParams.base_material || 'N/A'}
 - Fenestration: ${elevationParams.fenestration_type || 'N/A'}
 - Balcony/Projection: ${elevationParams.has_balcony || 'False'}`
-        : '';
+          : '';
 
-      // Layer C: Blind Spot Inference trigger
-      const layerC_blindspot = `
+        const layerC_blindspot = `
 ## Step 3: Layering & Blind Spot Inference
-- Perspective: ${currentAngle === '06:00' ? '1-Point (face-on)' : '2-Point (corner/side)'}
+- Perspective: ${viewConfig.angle === '06:00' ? '1-Point (face-on)' : '2-Point (corner/side)'}
 - Blind Spot Logic: If target is Rear (12:00) or hidden side, extract Design DNA from front, infer MEP/Service Door placement.
 - Material Injection: Lock original textures. Apply Relighting only for new solar angle (${currentTime}).`;
 
-      const elevationSlots = getElevationSlot(currentAngle);
-      const elevationLabel = elevationSlots.map(s => s.label).join('+');
-      const imageCount = 1 + elevationSlots.length; // image 1 = original, rest = elevation crops
+        let activeElevationSlots = getElevationSlot(viewConfig.angle);
+        if (activeElevationSlots.length === 0) activeElevationSlots = getElevationSlot("06:00");
+        const elevationLabel = activeElevationSlots.map(s => s.label).join('+');
 
-      // Layer A + B + C: Unified Final Prompt (template.md compliant)
-      const finalPrompt = `
+        const finalPrompt = `
 # SYSTEM: 5-Point Integrated Viewpoint Simulation Architect (5-IVSP)
 
 # GOAL
@@ -966,10 +1019,10 @@ Change the angle of view of the provided architectural image to a specific new p
 
 # INPUT IMAGES
 - IMAGE 1 (Primary): The original uploaded architectural photo. Source of Truth for materials and visible geometry.
-${elevationSlots.length === 1
+${activeElevationSlots.length === 1
   ? `- IMAGE 2 (Geometric Reference): The pre-computed ${elevationLabel} elevation orthographic drawing, generated by PHASE 2 architectural inference. Use this as the STRICT geometric blueprint for the target viewpoint. The architectural form, proportions, and element placement MUST be reflected in the output.`
-  : `- IMAGE 2 (Geometric Reference A): The pre-computed ${elevationSlots[0].label} elevation — first adjacent face for this corner viewpoint.
-- IMAGE 3 (Geometric Reference B): The pre-computed ${elevationSlots[1].label} elevation — second adjacent face for this corner viewpoint.
+  : `- IMAGE 2 (Geometric Reference A): The pre-computed ${activeElevationSlots[0].label} elevation — first adjacent face for this corner viewpoint.
+- IMAGE 3 (Geometric Reference B): The pre-computed ${activeElevationSlots[1]?.label || activeElevationSlots[0].label} elevation — second adjacent face for this corner viewpoint.
   Both elevations are pre-computed by PHASE 2. Use them as the STRICT geometric blueprint. The 2-Point Perspective output MUST integrate both faces correctly.`
 }
 
@@ -991,134 +1044,125 @@ ${layerC_property}
   [ ] Perspective mathematically correct? (No Distortion)
   [ ] Blind spot logically inferred? (No Blank Spaces)
   [ ] IMAGE 2 elevation geometry reflected in output? (No Deviation)
-${prompt ? `\nAdditional instruction: ${prompt}` : ''}
 
 [GENERATE IMAGE NOW]
-      `.trim();
+        `.trim();
 
-      let actualImageSrc = sourceItem.src;
-      // V82: If generating from a generated image, we MUST use the mother image's src for the AI!
-      if (sourceItem.type === 'generated' && sourceItem.motherId) {
-        const motherItem = canvasItems.find(i => i.id === sourceItem.motherId);
-        if (motherItem) {
-          actualImageSrc = motherItem.src;
-        }
-      }
+        const runGen = async (modelName: string) => {
+          const parts: any[] = [
+            { inlineData: { data: base64Data, mimeType: mimeType } },
+          ];
 
-      const base64Data = actualImageSrc.split(',')[1];
-      const mimeType = actualImageSrc.split(';')[0].split(':')[1];
-
-      // [PHASE 4 - Step 3] Final Image Generation
-      const runGeneration = async (modelName: string) => {
-        const parts: any[] = [
-          { inlineData: { data: base64Data, mimeType: mimeType } },
-        ];
-
-        // V70/V71: Crop matching elevation slots and inject all
-        // Corner angles inject two adjacent faces as separate images
-        if (architecturalSheetImage) {
-          const slots = getElevationSlot(currentAngle);
-          for (const slot of slots) {
-            try {
-              const croppedElevation = await cropElevationFromSheet(architecturalSheetImage, slot);
-              const cropBase64 = croppedElevation.split(',')[1];
-              parts.push({ inlineData: { data: cropBase64, mimeType: 'image/png' } });
-              console.log(`[V70] Injecting cropped elevation: ${slot.label} (Row${slot.row}, Col${slot.col})`);
-            } catch (e) {
-              console.warn('[V70] Elevation crop failed:', slot.label, e);
+          if (architecturalSheetImage) {
+            for (const slot of activeElevationSlots) {
+              try {
+                const croppedElevation = await cropElevationFromSheet(architecturalSheetImage, slot);
+                const cropBase64 = croppedElevation.split(',')[1];
+                parts.push({ inlineData: { data: cropBase64, mimeType: 'image/png' } });
+                console.log(`[V70] Injecting cropped elevation: ${slot.label} (Row${slot.row}, Col${slot.col})`);
+              } catch (e) {
+                console.warn('[V70] Elevation crop failed:', slot.label, e);
+              }
             }
           }
-        }
 
-        parts.push({ text: finalPrompt });
+          parts.push({ text: finalPrompt });
 
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: { parts },
-        });
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts },
+          });
 
-        let foundImage = false;
-        if (response.candidates && response.candidates[0]?.content?.parts) {
-          for (const part of response.candidates[0].content.parts) {
-            if (part.inlineData) {
-              const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-              
-              // [PHASE 4 - Step 4] Result Projection
-              const img = new Image();
-              img.onload = () => {
-                const newGenItem: CanvasItem = {
-                  id: `gen-${Date.now()}`,
-                  type: 'generated',
-                  src: generatedSrc,
-                  x: sourceItem.x + sourceItem.width + 40,
-                  y: sourceItem.y,
-                  width: (img.width / img.height) * sourceItem.height,
-                  height: sourceItem.height,
-                  motherId: sourceItem.motherId || sourceItem.id,
-                  parameters: {
-                    angleIndex,
-                    altitudeIndex,
-                    lensIndex,
-                    timeIndex,
-                    analyzedOpticalParams: analyzedOpticalParams,
-                    elevationParams: elevationParams,
-                    sitePlanImage: sitePlanImage,
-                    architecturalSheetImage: architecturalSheetImage
-                  }
-                };
-                setCanvasItems(prev => {
-                  setHistoryStates(prevH => [...prevH, prev]);
-                  let currentX = sourceItem.x + sourceItem.width + 12;
-                  let currentY = sourceItem.y;
-                  let hasOverlap = true;
-
-                  // Simple overlap check
-                  while (hasOverlap) {
-                    hasOverlap = false;
-                    for (const item of prev) {
-                      // simple AABB intersection check
-                      if (
-                        currentX < item.x + item.width &&
-                        currentX + newGenItem.width > item.x &&
-                        currentY < item.y + item.height &&
-                        currentY + newGenItem.height > item.y
-                      ) {
-                        currentX = item.x + item.width + 12;
-                        hasOverlap = true;
-                        break;
+          if (response.candidates && response.candidates[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+              if (part.inlineData) {
+                const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                
+                await new Promise<void>((resolve) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    const newGenItem: CanvasItem = {
+                      id: `gen-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+                      type: 'generated',
+                      src: generatedSrc,
+                      x: 0,
+                      y: sourceItem.y,
+                      width: (img.width / img.height) * sourceItem.height,
+                      height: sourceItem.height,
+                      motherId: sourceItem.motherId || sourceItem.id,
+                      parameters: {
+                        angleIndex,
+                        altitudeIndex,
+                        lensIndex,
+                        timeIndex,
+                        analyzedOpticalParams,
+                        elevationParams,
+                        sitePlanImage,
+                        architecturalSheetImage
                       }
-                    }
-                  }
+                    };
+                    
+                    setCanvasItems(prev => {
+                      setHistoryStates(prevH => [...prevH, prev]);
+                      
+                      // V102: Place to the right of the rightmost image in the current row
+                      let maxEdgeX = sourceItem.x + sourceItem.width;
+                      for (const item of prev) {
+                        if (Math.abs(item.y - sourceItem.y) < 10) {
+                            const rightEdge = item.x + item.width;
+                            if (rightEdge > maxEdgeX) maxEdgeX = rightEdge;
+                        }
+                      }
+                      
+                      let currentX = maxEdgeX + 40;
+                      let currentY = sourceItem.y;
+                      let hasOverlap = true;
+                      while (hasOverlap) {
+                        hasOverlap = false;
+                        for (const item of prev) {
+                          if (
+                            currentX < item.x + item.width &&
+                            currentX + newGenItem.width > item.x &&
+                            currentY < item.y + item.height &&
+                            currentY + newGenItem.height > item.y
+                          ) {
+                            currentX = item.x + item.width + 40;
+                            hasOverlap = true;
+                            break;
+                          }
+                        }
+                      }
 
-                  newGenItem.x = currentX;
-                  newGenItem.y = currentY;
+                      newGenItem.x = currentX;
+                      newGenItem.y = currentY;
 
-                  return [...prev, newGenItem];
+                      return [...prev, newGenItem];
+                    });
+                    setSelectedItemId(newGenItem.id);
+                    // Single view manually triggered changes instantly
+                    // Batch view shouldn't swap tab wildly, but result is fine
+                    if (!isFirstTime) setActiveTab('result');
+                    resolve();
+                  };
+                  img.src = generatedSrc;
                 });
-                setSelectedItemId(newGenItem.id);
-                setActiveTab('result');
-              };
-              img.src = generatedSrc;
-              
-              foundImage = true;
-              break;
+                return true;
+              }
             }
           }
-        }
-        return foundImage;
-      };
+          return false;
+        };
 
-      // Try primary model, fallback if needed
-      try {
-        const success = await runGeneration(IMAGE_GEN);
-        if (!success) throw new Error("Text returned instead of image");
-      } catch (primaryError) {
-        console.warn(`Primary model (${IMAGE_GEN}) failed, retrying with fallback...`, primaryError);
-        const success = await runGeneration(IMAGE_GEN_FALLBACK);
-        if (!success) {
-          alert("Failed to generate image with both primary and fallback models.");
+        try {
+          const success = await runGen(IMAGE_GEN);
+          if (!success) throw new Error("Fallback needed");
+        } catch (e) {
+          const successFallback = await runGen(IMAGE_GEN_FALLBACK);
+          if (!successFallback) {
+             console.error("Failed to generate view with fallback");
+          }
         }
-      }
+      } // End of viewsToGenerate loop
 
     } catch (error) {
       console.error("Generation Error:", error);
@@ -1128,6 +1172,10 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
     }
   };
 
+  const currentSourceItem = selectedItemId ? canvasItems.find(item => item.id === selectedItemId) : (canvasItems.length > 0 ? canvasItems[0] : null);
+  const isSelectedItemUpload = currentSourceItem?.type === 'upload';
+  const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === currentSourceItem?.id || (i.motherId === undefined && i.id === currentSourceItem?.id)));
+  const areSlidersLocked = isSelectedItemUpload && !hasInitialViews;
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-white dark:bg-black text-black dark:text-white font-sans transition-colors duration-300 selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black overflow-hidden">
@@ -1521,7 +1569,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                       isAnalyzing={isAnalyzing}
                     />
                     
-                    <div className="flex flex-col mt-2 space-y-5">
+                    <div className={`flex flex-col mt-2 space-y-5 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
                       {/* Controls */}
                       <div>
                         <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
