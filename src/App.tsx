@@ -940,8 +940,8 @@ export default function App() {
           name: "Detail View",
           angle: "06:00",
           altitude: "10m (Low Aerial View)",
-          lens: "110mm Macro Lens",
-          distance: "approx 10m",
+          lens: "50mm (Normal Lens)",
+          distance: "approx 2m",
           scenario: "Detail / Close-up",
         });
       } else {
@@ -1078,30 +1078,6 @@ ${layerC_property}
               if (part.inlineData) {
                 const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
                 
-                // V105: Detail View Validation
-                if (viewConfig.name === "Detail View") {
-                  try {
-                    console.log("[V105] Validating Detail View generation...");
-                    const valResult = await ai.models.generateContent({
-                      model: 'gemini-2.5-flash',
-                      contents: {
-                        parts: [
-                          { inlineData: { data: part.inlineData.data, mimeType: part.inlineData.mimeType } },
-                          { text: "Is this image a detailed, close-up face-on architectural view? It MUST strictly show a very close-up detail, not the entire full building. Answer ONLY 'YES' or 'NO'." }
-                        ]
-                      }
-                    });
-                     const txt = valResult.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase() || "";
-                     if (txt.includes('NO') || txt.includes('FALSE')) {
-                       console.warn("[V105] Validation failed (Not a detail view). Returning false to trigger retry.");
-                       return false; 
-                     }
-                     console.log("[V105] Validation passed!");
-                  } catch(e) {
-                     console.warn("[V105] Validation API failed, proceeding anyway", e);
-                  }
-                }
-
                 await new Promise<void>((resolve) => {
                   const img = new Image();
                   img.onload = () => {
@@ -1177,32 +1153,13 @@ ${layerC_property}
           return false;
         };
 
-        let success = false;
-        let retries = 0;
-        // V105: Max 3 retries for Detail View to enforce strict validation
-        const maxRetries = viewConfig.name === "Detail View" ? 3 : 1;
-
-        while (!success && retries < maxRetries) {
-          retries++;
-          try {
-            success = await runGen(IMAGE_GEN);
-            if (!success) {
-               console.warn(`[V105] Generation returned false, retry ${retries}/${maxRetries}`);
-            }
-          } catch (e) {
-            console.warn(`[V105] Generation error on retry ${retries}`, e);
-          }
-          
-          if (!success && retries >= maxRetries) {
-            console.warn(`[V105] Max retries reached. Trying fallback model...`);
-            try {
-              const successFallback = await runGen(IMAGE_GEN_FALLBACK);
-              if (!successFallback) {
-                console.error(`[V105] Failed to generate view with fallback`);
-              }
-            } catch(e) {
-              console.error(`[V105] Fallback also failed`, e);
-            }
+        try {
+          const success = await runGen(IMAGE_GEN);
+          if (!success) throw new Error("Fallback needed");
+        } catch (e) {
+          const successFallback = await runGen(IMAGE_GEN_FALLBACK);
+          if (!successFallback) {
+             console.error("Failed to generate view with fallback");
           }
         }
       } // End of viewsToGenerate loop
@@ -1548,8 +1505,8 @@ ${layerC_property}
               <aside 
                 className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto border border-black/50 shadow-xl dark:border-white/50 bg-white/90 dark:bg-black/90 backdrop-blur-sm"
               >
-                {/* Sidebar Content Wrapper */}
-                <div className={`flex flex-col h-full overflow-y-auto transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
+                {/* Sidebar Content Wrapper - V105: Removed global overflow-y-auto to prevent scrollbars */}
+                <div className={`flex flex-col h-full transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
                 
                   {/* V89: Dots Navigation Replaced by Action Buttons */}
                   <div className="pt-5 pb-3 px-5">
@@ -1604,13 +1561,15 @@ ${layerC_property}
                   </div>
                 
                 {activeTab === 'create' ? (
-                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1">
-                    <SitePlanDiagram 
-                      angle={ANGLES[angleIndex]} 
-                      lens={LENSES[lensIndex].value} 
-                      sitePlanImage={sitePlanImage} 
-                      isAnalyzing={isAnalyzing}
-                    />
+                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1 min-h-0 overflow-hidden">
+                    <div className="flex-shrink min-h-0 max-h-[240px] aspect-square mx-auto w-full">
+                      <SitePlanDiagram 
+                        angle={ANGLES[angleIndex]} 
+                        lens={LENSES[lensIndex].value} 
+                        sitePlanImage={sitePlanImage} 
+                        isAnalyzing={isAnalyzing}
+                      />
+                    </div>
                     
                     <div className={`flex flex-col mt-2 space-y-5 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
                       {/* Controls */}
@@ -1645,7 +1604,7 @@ ${layerC_property}
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1">
+                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1 overflow-y-auto min-h-0">
                     <div className="font-mono text-xs leading-normal tracking-widest space-y-4">
                       {/* V89: Viewpoint details (SCENARIO, ANGLE, ALTITUDE, PROMPT) removed from Report View */}
                       {/* V80: PHASE 3 Detailed Parameters Rendering */}
