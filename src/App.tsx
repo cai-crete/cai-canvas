@@ -1079,6 +1079,11 @@ ${layerC_property}
                 await new Promise<void>((resolve) => {
                   const img = new Image();
                   img.onload = () => {
+                    // V109: Reverse-lookup exact indices from viewConfig to snapshot each image's true params
+                    const snapAngleIndex = Math.max(0, ANGLES.findIndex(a => viewConfig.angle.startsWith(a)));
+                    const snapLensIndex  = Math.max(0, LENSES.findIndex(l => viewConfig.lens.includes(String(l.value))));
+                    const snapAltIndex   = Math.max(0, ALTITUDES.findIndex(a => viewConfig.altitude.includes(String(a.value))));
+
                     const newGenItem: CanvasItem = {
                       id: `gen-${Date.now()}-${Math.floor(Math.random()*1000)}`,
                       type: 'generated',
@@ -1089,9 +1094,9 @@ ${layerC_property}
                       height: sourceItem.height,
                       motherId: sourceItem.motherId || sourceItem.id,
                       parameters: {
-                        angleIndex,
-                        altitudeIndex,
-                        lensIndex,
+                        angleIndex:    snapAngleIndex,
+                        altitudeIndex: snapAltIndex,
+                        lensIndex:     snapLensIndex,
                         timeIndex,
                         analyzedOpticalParams,
                         elevationParams,
