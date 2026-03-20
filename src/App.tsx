@@ -1445,7 +1445,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                 <div className={`flex flex-col h-full overflow-y-auto transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
                 
                   {/* V89: Dots Navigation Replaced by Action Buttons */}
-                  <div className="pt-5 pb-1 px-5">
+                  <div className="pt-5 pb-3 px-5">
                     <div className="flex items-stretch border border-black dark:border-white rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
                       <button 
                         onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
@@ -1500,7 +1500,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                   </div>
                 
                 {activeTab === 'create' ? (
-                  <div className="flex flex-col gap-5 p-5 flex-1">
+                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1">
                     <SitePlanDiagram 
                       angle={ANGLES[angleIndex]} 
                       lens={LENSES[lensIndex].value} 
@@ -1541,7 +1541,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-5 px-5 pb-5 flex-1">
+                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1">
                     <div className="flex justify-between items-center mb-1">
                       <h3 className="text-xl font-display uppercase tracking-widest leading-none">Analysis Report</h3>
                     </div>
