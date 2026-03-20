@@ -938,10 +938,10 @@ export default function App() {
         });
         viewsToGenerate.push({
           name: "Detail View",
-          angle: cornerAngle,
-          altitude: "1.6m (Eye Level View)",
-          lens: "50mm (Normal Lens)",
-          distance: "approx 10m",
+          angle: "04:30 or 06:00 or 07:30 (Pick best for visibility)",
+          altitude: "1.6m (Eye Level) or 10m (Low Aerial)",
+          lens: "85mm (Short Telephoto Lens)",
+          distance: "approx 2m",
           scenario: "Detail / Close-up",
         });
       } else {
