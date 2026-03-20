@@ -1446,7 +1446,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                 
                   {/* V89: Dots Navigation Replaced by Action Buttons */}
                   <div className="pt-5 pb-3 px-5">
-                    <div className="flex items-stretch border border-black dark:border-white rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+                    <div className="flex items-stretch h-[36px] border border-black dark:border-white rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
                       <button 
                         onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
                         className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-r border-black/10 dark:border-white/10 flex items-center justify-center"
@@ -1458,7 +1458,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                       {(() => {
                         const selItem = canvasItems.find(i => i.id === selectedItemId);
                         if (!selItem) return (
-                          <div className="flex-1 py-1.5 font-display tracking-widest uppercase text-center opacity-30 text-[11px] flex items-center justify-center">
+                          <div className="flex-1 font-display tracking-widest uppercase text-center opacity-30 text-[11px] flex items-center justify-center">
                             Select Image
                           </div>
                         );
@@ -1467,7 +1467,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                             <button 
                               onClick={handleGenerate}
                               disabled={isGenerating}
-                              className="relative flex-1 py-1.5 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[11px]"
+                              className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[11px] flex items-center justify-center"
                             >
                               <span className={`block transition-opacity ${isGenerating ? 'opacity-0' : 'opacity-100'}`}>Generate</span>
                               {isGenerating && (
@@ -1482,7 +1482,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                           <button 
                             onClick={() => analyzeViewpoint(selItem.src, selItem.id)}
                             disabled={isAnalyzing}
-                            className="flex-1 py-1.5 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30 font-medium text-[11px]"
+                            className="flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30 font-medium text-[11px] flex items-center justify-center"
                           >
                             {isAnalyzing ? 'Analyzing...' : 'Analysis'}
                           </button>
