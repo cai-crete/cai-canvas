@@ -1350,10 +1350,10 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                       <div 
                         className={`absolute flex bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
                         style={{
-                          left: `calc(100% + ${12 / (canvasZoom / 100)}px)`,
+                          left: 'calc(100% + 12px)',
                           top: 0,
-                          width: `${800 / (canvasZoom / 100)}px`,
-                          height: `${600 / (canvasZoom / 100)}px`,
+                          width: '800px',
+                          height: '600px',
                           border: 'none',
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
@@ -1367,7 +1367,7 @@ ${prompt ? `\nAdditional instruction: ${prompt}` : ''}
                                     </div>
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center text-center p-4">
-                                      <p className="font-mono opacity-40 uppercase tracking-widest" style={{ fontSize: `${14 / (canvasZoom / 100)}px`}}>No Architectural Sheet Generated</p>
+                                      <p className="font-mono opacity-40 uppercase tracking-widest text-[14px]">No Architectural Sheet Generated</p>
                                     </div>
                                 )}
                             </div>
