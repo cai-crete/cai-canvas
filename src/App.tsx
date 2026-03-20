@@ -936,11 +936,11 @@ export default function App() {
         });
         viewsToGenerate.push({
           name: "Detail View",
-          angle: "AI Optimal Selection (e.g., 06:00, 04:30 or 07:30)",
-          altitude: "AI Choice: 10m (Low Aerial) OR 50m (Mid Aerial)",
-          lens: "AI Choice: 85mm (Short Telephoto) OR 110mm (Macro)",
+          angle: "AI Choice: Side Angle (e.g., 09:00, 03:00, 07:30, 04:30) to show the facade on the left or right side",
+          altitude: "1.6m (Street level)",
+          lens: "AI Choice: 35mm (Wide Standard) OR 45mm (Standard)",
           distance: "approx 2m~5m",
-          scenario: "Detail / Close-up",
+          scenario: "Street-Level Facade Detail (Lower facade visible on left or right)",
         });
       } else {
         viewsToGenerate.push({
