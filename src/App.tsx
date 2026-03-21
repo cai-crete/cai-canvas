@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 
@@ -238,11 +238,30 @@ export default function App() {
 
   // V75: History State for Undo
   const [historyStates, setHistoryStates] = useState<CanvasItem[][]>([]);
+  // V113: Redo State
+  const [redoStates, setRedoStates] = useState<CanvasItem[][]>([]);
+
   const handleUndo = () => {
     if (historyStates.length > 0) {
-      setCanvasItems(historyStates[historyStates.length - 1]);
+      const currentState = [...canvasItems];
+      const previousState = historyStates[historyStates.length - 1];
+      
+      setRedoStates(prev => [...prev, currentState]);
+      setCanvasItems(previousState);
       setHistoryStates(prev => prev.slice(0, -1));
-      setSelectedItemId(null); // Optional: clear selection on undo
+      setSelectedItemId(null);
+    }
+  };
+
+  const handleRedo = () => {
+    if (redoStates.length > 0) {
+      const currentState = [...canvasItems];
+      const nextState = redoStates[redoStates.length - 1];
+
+      setHistoryStates(prev => [...prev, currentState]);
+      setCanvasItems(nextState);
+      setRedoStates(prev => prev.slice(0, -1));
+      setSelectedItemId(null);
     }
   };
 
@@ -449,6 +468,10 @@ export default function App() {
         for (const corner of corners) {
           const dist = Math.hypot(coords.x - corner.x, coords.y - corner.y);
           if (dist < hitRadius) {
+            // V113: Save state before resizing
+            setHistoryStates(prev => [...prev, canvasItems]);
+            setRedoStates([]);
+
             isResizingItemRef.current = true;
             setIsResizingItem(true);
             resizeCornerRef.current = { dx: corner.dx, dy: corner.dy };
@@ -467,6 +490,10 @@ export default function App() {
     );
 
     if (clickedItem) {
+      // V113: Save state before moving item
+      setHistoryStates(prev => [...prev, canvasItems]);
+      setRedoStates([]);
+
       setSelectedItemId(clickedItem.id);
       isDraggingItemRef.current = true;
       setIsDraggingItem(true);
@@ -1194,7 +1221,7 @@ ${layerC_property}
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-white dark:bg-black text-black dark:text-white font-sans transition-colors duration-300 selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black overflow-hidden">
       {/* HEADER */}
-      <header className="h-16 shrink-0 flex justify-between items-center px-4 border-b border-black/10 dark:border-white/10 transition-colors duration-300">
+      <header className="h-[54px] shrink-0 flex justify-between items-center px-4 border-b border-black/10 dark:border-white/10 bg-white/90 dark:bg-black/90 backdrop-blur-sm transition-colors duration-300">
         <div className="flex items-center gap-3">
           <span className="text-[1.575rem] font-display font-bold tracking-[0.0125em] uppercase leading-tight pt-1">CAI</span>
           <span className="text-[1.575rem] font-display font-bold tracking-[0.0125em] uppercase leading-tight pt-1">CANVAS</span>
@@ -1227,15 +1254,20 @@ ${layerC_property}
           onTouchEnd={handleTouchEnd}
         >
 
-          <div className={`
-            absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1
-            bg-white/90 border border-black/50 shadow-xl dark:bg-black/90 dark:border-white/50 pointer-events-auto
-            transition-all duration-300 rounded-full py-2 w-11 backdrop-blur-sm
-          `}>
+          <div 
+            className={`
+              absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2
+              bg-white/90 dark:bg-black/90 dark:border-white/50 pointer-events-auto
+              transition-all duration-300 rounded-full py-2.5 w-11 backdrop-blur-sm
+            `}
+            style={{
+              boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
+            }}
+          >
             {/* 1. 도구 모드 (Select / Pan) */}
             <button 
               onClick={() => setCanvasMode('select')}
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${canvasMode === 'select' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'select' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Select Mode"
             >
               <MousePointer2 size={18} />
@@ -1244,13 +1276,13 @@ ${layerC_property}
               onClick={() => {
                 setCanvasMode('pan');
               }}
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${canvasMode === 'pan' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'pan' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Pan Mode"
             >
               <Hand size={18} />
             </button>
 
-            {/* V75: Undo Button */}
+            {/* V75/V113: Undo & Redo Buttons */}
             <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
             <button 
               onClick={handleUndo}
@@ -1260,27 +1292,38 @@ ${layerC_property}
             >
               <Undo size={18} />
             </button>
+            <button 
+              onClick={handleRedo}
+              disabled={redoStates.length === 0}
+              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${redoStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              title="Redo"
+            >
+              <Redo size={18} />
+            </button>
           </div>
 
           {/* V71: Dynamic Horizontal Control Bar (Upload + Zoom + Compass) */}
           <div 
             className={`
               absolute bottom-[12px] z-30 flex items-center
-              bg-white/90 border border-black/50 shadow-xl dark:bg-black/90 dark:border-white/50 pointer-events-auto
+              bg-white/90 dark:bg-black/90 pointer-events-auto
               transition-all duration-500 ease-in-out rounded-full overflow-hidden h-11 backdrop-blur-sm
             `}
             style={{
               left: isRightPanelOpen ? '50%' : 'calc(100% - 12px)',
               transform: isRightPanelOpen ? 'translateX(-50%)' : 'translateX(-100%)',
-              whiteSpace: 'nowrap'
+              whiteSpace: 'nowrap',
+              paddingLeft: '6px',
+              paddingRight: '6px',
+              boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
             }}
           >
             {/* 1. 이미지 업로드 버튼 */}
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
-            <div className="flex px-1">
+            <div className="flex px-1 min-h-[44px] items-center">
               <button 
                 onClick={() => fileInputRef.current?.click()} 
-                className="w-10 h-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
+                className="w-9 h-9 aspect-square flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
                 title="Upload Image"
               >
                 <Upload size={18} />
@@ -1290,10 +1333,10 @@ ${layerC_property}
             <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10" />
 
             {/* 2. 돋보기 / 초기화 */}
-            <div className="flex px-1">
+            <div className="flex px-1 min-h-[44px] items-center">
               <button 
                 onClick={handleFocus} 
-                className="w-10 h-full flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
+                className="w-9 h-9 aspect-square flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
                 title="Fit to 100% / Focus Target"
               >
                 <Search size={18} />
@@ -1303,10 +1346,10 @@ ${layerC_property}
             <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10" />
 
             {/* 3. 줌 컨트롤 */}
-            <div className="flex px-1 select-none items-center">
-              <button onClick={() => zoomStep(-1)} className="w-10 h-full flex items-center justify-center font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="Zoom Out">−</button>
+            <div className="flex px-1 select-none items-center min-h-[44px]">
+              <button onClick={() => zoomStep(-1)} className="w-9 h-9 aspect-square flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="Zoom Out">−</button>
               <div className="min-w-[60px] h-full flex items-center justify-center font-mono text-sm px-1 font-bold">{Math.round(canvasZoom)}%</div>
-              <button onClick={() => zoomStep(1)} className="w-10 h-full flex items-center justify-center font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="Zoom In">+</button>
+              <button onClick={() => zoomStep(1)} className="w-9 h-9 aspect-square flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="Zoom In">+</button>
             </div>
 
             <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10" />
@@ -1315,9 +1358,9 @@ ${layerC_property}
             <div className="flex px-1">
               <button 
                 onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-                className={`w-10 h-9 flex items-center justify-center transition-colors ${
+                className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${
                   isRightPanelOpen 
-                    ? 'bg-black text-white dark:bg-white dark:text-black rounded-full' 
+                    ? 'bg-black text-white dark:bg-white dark:text-black' 
                     : 'hover:bg-black/5 dark:hover:bg-white/5'
                 }`}
                 title="Toggle Panel"
@@ -1388,42 +1431,48 @@ ${layerC_property}
                   >
                     {/* V80/V81: Floating Control Bar for All Images */}
                     <div 
-                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] divide-x divide-black/10 dark:divide-white/10 border border-black/40 dark:border-white/40 rounded-2xl shadow-sm pointer-events-auto`}
+                      className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] px-1.5 rounded-full pointer-events-auto transition-all duration-300`}
                       style={{
-                        top: `-${48 / (canvasZoom / 100)}px`, // 36px height + 12px padding scaled inversely
+                        top: `-${56 / (canvasZoom / 100)}px`, // Adjusted top margin
                         right: 0,
-                        height: `${36 / (canvasZoom / 100)}px`,
+                        height: `${44 / (canvasZoom / 100)}px`,
+                        boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
                       }}
                       onPointerDown={(e) => e.stopPropagation()}
                     >
                       {item.type === 'generated' && (
                         /* V82: Add Download button for generated images */
-                        <a 
-                          href={item.src}
-                          download="simulation.png"
-                          className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-l-2xl"
-                          style={{ width: `${40 / (canvasZoom / 100)}px`, height: '100%' }}
-                          title="다운로드"
-                        >
-                          <Download size={14 / (canvasZoom / 100)} />
-                        </a>
+                        <>
+                          <a 
+                            href={item.src}
+                            download="simulation.png"
+                            className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                            style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                            title="다운로드"
+                          >
+                            <Download size={14 / (canvasZoom / 100)} />
+                          </a>
+                          <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                        </>
                       )}
                       <button 
                         onClick={() => setOpenLibraryItemId(prev => prev === item.id ? null : item.id)}
-                        className={`flex items-center justify-center transition-colors ${item.type !== 'generated' ? 'rounded-l-2xl' : ''} ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-                        style={{ width: `${40 / (canvasZoom / 100)}px`, height: '100%' }}
+                        className={`flex items-center justify-center transition-colors rounded-full ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                        style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
                         title="라이브러리 (아트보드)"
                       >
                         <Book size={12 / (canvasZoom / 100)} />
                       </button>
+                      <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                       <button 
                         onClick={() => {
                           setHistoryStates(prevH => [...prevH, canvasItems]);
+                          setRedoStates([]);
                           setCanvasItems(prev => prev.filter(i => i.id !== item.id && i.motherId !== item.id));
                           setSelectedItemId(null);
                         }}
-                        className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-r-2xl"
-                        style={{ width: `${40 / (canvasZoom / 100)}px`, height: '100%' }}
+                        className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
+                        style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
                         title="삭제"
                       >
                         <Trash2 size={12 / (canvasZoom / 100)} />
@@ -1517,7 +1566,10 @@ ${layerC_property}
             {/* FLOATING PANEL - V59: Target Transparency (10% / 90% opacity) */}
             <div className={`w-full h-full transition-all duration-500 ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
               <aside 
-                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto border border-black/50 shadow-xl dark:border-white/50 bg-white/90 dark:bg-black/90 backdrop-blur-sm"
+                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/90 dark:bg-black/90 backdrop-blur-sm"
+                style={{
+                   boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
+                }}
               >
                 {/* Sidebar Content Wrapper - V105: Removed global overflow-y-auto to prevent scrollbars */}
                 <div className={`flex flex-col h-full transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
