@@ -1385,6 +1385,7 @@ ${layerC_property}
               style={{
                 top: '-15000px', left: '-15000px',
                 width: '30000px', height: '30000px',
+                backgroundColor: 'rgba(0, 0, 255, 0.01)',
                 backgroundImage: `
                   linear-gradient(to right, rgba(128,128,128,0.1) 1px, transparent 1px),
                   linear-gradient(to bottom, rgba(128,128,128,0.1) 1px, transparent 1px),
