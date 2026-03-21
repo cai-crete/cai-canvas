@@ -1515,7 +1515,7 @@ ${layerC_property}
             ${isRightPanelOpen ? 'w-[284px]' : 'w-0'}
           `}>
             {/* FLOATING PANEL - V59: Target Transparency (10% / 90% opacity) */}
-            <div className={`w-full h-full overflow-hidden transition-all duration-500 ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
+            <div className={`w-full h-full transition-all duration-500 ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
               <aside 
                 className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto border border-black/50 shadow-xl dark:border-white/50 bg-white/90 dark:bg-black/90 backdrop-blur-sm"
               >
