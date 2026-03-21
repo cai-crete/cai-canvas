@@ -77,7 +77,7 @@ const cropElevationFromSheet = (sheetDataUrl: string, slot: { row: number; col: 
 
 
 // --- Site Plan Diagram Component ---
-const SitePlanDiagram = ({ angle, lens, sitePlanImage, isAnalyzing }: { angle: string, lens: number, sitePlanImage: string | null, isAnalyzing: boolean }) => {
+const SitePlanDiagram = ({ angle, isAnalyzing }: { angle: string, lens: number, sitePlanImage: string | null, isAnalyzing: boolean }) => {
   // Map angle string to degrees (06:00 = 180deg, 12:00 = 0deg, etc.)
   const angleMap: Record<string, number> = {
     '12:00': 0, '1:30': 45, '3:00': 90, '04:30': 135,
@@ -95,66 +95,46 @@ const SitePlanDiagram = ({ angle, lens, sitePlanImage, isAnalyzing }: { angle: s
   const cameraY = cy + radius * Math.sin(rad);
 
   return (
-    <div className="w-full aspect-square bg-white dark:bg-black border border-black/10 dark:border-white/10 relative flex items-center justify-center overflow-hidden transition-colors duration-300">
-      {/* 80% Safety Box (Area for site plan) */}
-      <div className="absolute w-[80%] h-[80%] border border-dashed border-black/5 dark:border-white/5 flex items-center justify-center z-0">
-        {sitePlanImage ? (
-          <div className="relative w-full h-full flex items-center justify-center p-4">
-            <img src={sitePlanImage} alt="Site Plan" className="max-w-full max-h-full object-contain opacity-80" />
-            
-            {/* 4 Corners Coordinates (New Mapping: Front=Bottom, Back=Top) */}
-            <div className="absolute bottom-[13%] left-[10%] w-2 h-2 rounded-full bg-blue-500 shadow-sm border border-white dark:border-black" title="좌전 (Blue)" />
-            <div className="absolute bottom-[13%] right-[10%] w-2 h-2 rounded-full bg-red-500 shadow-sm border border-white dark:border-black" title="우전 (Red)" />
-            <div className="absolute top-[10%] left-[10%] w-2 h-2 rounded-full bg-yellow-400 shadow-sm border border-white dark:border-black" title="좌후 (Yellow)" />
-            <div className="absolute top-[10%] right-[10%] w-2 h-2 rounded-full bg-green-500 shadow-sm border border-white dark:border-black" title="우후 (Green)" />
-            
-            {/* Front Label (Relative 06:00 Anchor) */}
-            <div className="absolute bottom-1 left-1/2 -translate-x-1/2 font-mono text-[9px] font-bold tracking-[0.2em] uppercase opacity-40">Front (06:00)</div>
-          </div>
-        ) : (
-          <div className="relative w-[60%] h-[40%] border border-black dark:border-white flex flex-col items-center justify-center z-0 opacity-20">
-             {/* Fallback Rectangle Silhouette */}
-             <div className="text-[9px] font-mono uppercase tracking-widest mt-auto mb-1">Front</div>
-             {/* Fallback Corners (New Mapping) */}
-             <div className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-blue-500 -translate-x-1/2 translate-y-1/2" />
-             <div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-red-500 translate-x-1/2 translate-y-1/2" />
-             <div className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-yellow-400 -translate-x-1/2 -translate-y-1/2" />
-             <div className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-green-500 translate-x-1/2 -translate-y-1/2" />
-          </div>
-        )}
+    <div className="w-full aspect-square relative flex items-center justify-center overflow-hidden transition-colors duration-300">
+      
+      {/* 80% Center Canvas */}
+      <div className="absolute w-[80%] h-[80%] flex items-center justify-center z-0">
+        <div className="relative w-full h-full flex items-center justify-center">
+             
+           {/* Center Rectangle (Black fill, white 0.5 stroke, diagonal pattern) */}
+           <div 
+             className="relative w-[60%] h-[40%] bg-black dark:bg-white flex items-center justify-center z-0 overflow-hidden"
+             style={{
+               border: '1px solid rgba(255,255,255,0.5)',
+             }}
+           >
+             {/* Diagonal pattern */}
+             <div className="absolute inset-0 opacity-50 bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,white_2px,white_4px)] dark:bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,black_2px,black_4px)]" />
+           </div>
+        </div>
       </div>
 
       {/* SVG Diagram Layer */}
       <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full z-10 pointer-events-none">
-        {/* Orbit Path (Solid, 50% Opacity) */}
+        {/* Dashed Circle (Ratio 2(line):1(gap)) */}
         <circle 
           cx={cx} cy={cy} r={radius} 
-          fill="none" stroke="currentColor" strokeWidth="0.5" 
-          className="text-black dark:text-white opacity-50"
+          fill="none" stroke="currentColor" strokeWidth="1" 
+          strokeDasharray="8 4"
+          className="text-black/30 dark:text-white/30"
         />
         
-        {/* Camera Pictogram (Pointing to center) */}
+        {/* Camera Pictogram / Dot */}
         <g transform={`translate(${cameraX}, ${cameraY}) rotate(${rotation})`}>
-          {/* Simple Camera Icon (Scaled 1.2x) */}
-          <rect x="-7.2" y="-4.8" width="14.4" height="9.6" rx="1" fill="currentColor" className="text-black dark:text-white opacity-90" />
-          <circle cx="0" cy="0" r="3.0" fill="white" className="dark:fill-black" />
-          <path d="M-2.4 -7.2 L2.4 -7.2 L1.2 -4.8 L-1.2 -4.8 Z" fill="currentColor" className="text-black dark:text-white opacity-90" />
-          
-          {/* Lens Indicator (Variable length based on 'lens' value, Scaled 1.2x) */}
-          <path 
-            d={`M-3.6 4.8 L3.6 4.8 L${lens > 80 ? 4.8 : 3.6} ${lens > 80 ? 14.4 : (lens > 40 ? 9.6 : 7.2)} L${lens > 80 ? -4.8 : -3.6} ${lens > 80 ? 14.4 : (lens > 40 ? 9.6 : 7.2)} Z`} 
-            fill="currentColor" 
-            className="text-black dark:text-white opacity-90" 
-          />
+          <circle cx="0" cy="0" r="4.0" fill="currentColor" className="text-black dark:text-white" />
         </g>
       </svg>
 
       {/* Analyzing Overlay */}
       {isAnalyzing && (
-        <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-30 transition-colors duration-300">
-          <Loader2 size={32} className="animate-spin mb-3" />
-          <p className="font-display text-sm uppercase tracking-widest text-center px-4">Analyzing Viewpoint...</p>
-          <p className="font-mono text-[9px] leading-relaxed opacity-60 mt-1 uppercase">Mapping Site Geometry</p>
+        <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-30 transition-colors duration-300 rounded-full">
+          <Loader2 size={32} className="animate-spin mb-3 text-black dark:text-white" />
+          <p className="font-display text-[10px] uppercase tracking-widest text-center px-4">Analyzing...</p>
         </div>
       )}
     </div>
@@ -622,6 +602,35 @@ export default function App() {
       reader.onloadend = async () => {
         const base64Image = reader.result as string;
         
+        setIsAnalyzing(true);
+        let finalBase64 = base64Image;
+
+        // V124: Auto-Regenerate image using gemini-3.1-flash-image-preview
+        try {
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const response = await ai.models.generateContent({
+            model: IMAGE_GEN,
+            contents: {
+              parts: [
+                { inlineData: { data: base64Image.split(',')[1], mimeType: base64Image.split(';')[0].split(':')[1] } },
+                { text: "Recreate and enhance this architectural image exactly as it is without altering its geometry or perspective." }
+              ]
+            }
+          });
+
+          if (response.candidates && response.candidates[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+              if (part.inlineData) {
+                finalBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                console.log("[V124] Image successfully regenerated via", IMAGE_GEN);
+                break;
+              }
+            }
+          }
+        } catch (error) {
+          console.error("[V124] Image regeneration failed, falling back to original:", error);
+        }
+
         // Load image to get dimensions for initial canvas item
         const img = new Image();
         img.onload = () => {
@@ -646,7 +655,7 @@ export default function App() {
           const newItem: CanvasItem = {
             id: newItemId,
             type: 'upload',
-            src: base64Image,
+            src: finalBase64,
             x: newX,
             y: newY,
             width: img.width,
@@ -661,8 +670,10 @@ export default function App() {
           setSitePlanImage(null);
           setActiveTab('create');
 
+          // V124: Auto-trigger Phase 2 Analysis
+          analyzeViewpoint(finalBase64, newItemId);
         };
-        img.src = base64Image;
+        img.src = finalBase64;
       };
       reader.readAsDataURL(file);
     }
@@ -992,7 +1003,7 @@ export default function App() {
       const base64Data = actualImageSrc.split(',')[1];
       const mimeType = actualImageSrc.split(';')[0].split(':')[1];
 
-      for (const viewConfig of viewsToGenerate) {
+      const generatePromises = viewsToGenerate.map(async (viewConfig) => {
         const currentTime = TIMES[timeIndex];
 
         const layerB_viewpoint = `
@@ -1203,7 +1214,9 @@ ${layerC_property}
              console.error("Failed to generate view with fallback");
           }
         }
-      } // End of viewsToGenerate loop
+      }); // End of viewsToGenerate map
+
+      await Promise.all(generatePromises);
 
     } catch (error) {
       console.error("Generation Error:", error);
@@ -1568,74 +1581,57 @@ ${layerC_property}
                    boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
                 }}
               >
-                {/* Sidebar Content Wrapper - V105: Removed global overflow-y-auto to prevent scrollbars */}
+                {/* Sidebar Content Wrapper */}
                 <div className={`flex flex-col h-full transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
                 
-                  {/* V89: Dots Navigation Replaced by Action Buttons */}
-                  <div className="pt-5 pb-3 px-5">
-                    <div className="flex items-stretch h-[36px] border border-black/50 dark:border-white/50 rounded-md overflow-hidden bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+                  {/* Top Navigation - V124: < CHANGE VIEWPOINT > */}
+                  <div className="pt-4 pb-2 px-4 shrink-0">
+                    <div className="flex items-center justify-between gap-1.5">
                       <button 
-                        onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
-                        disabled={!selectedItemId}
-                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-r border-black/10 dark:border-white/10 flex items-center justify-center disabled:opacity-20 disabled:cursor-not-allowed"
-                        title="Toggle View"
+                        onClick={() => {
+                          const currentIndex = canvasItems.findIndex(i => i.id === selectedItemId);
+                          if (currentIndex > 0) setSelectedItemId(canvasItems[currentIndex - 1].id);
+                        }} 
+                        disabled={!selectedItemId || canvasItems.findIndex(i => i.id === selectedItemId) <= 0}
+                        className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 transition-colors disabled:opacity-20 flex-shrink-0"
                       >
                         <ChevronLeft size={16} />
                       </button>
-
-                      {(() => {
-                        const selItem = canvasItems.find(i => i.id === selectedItemId);
-                        if (!selItem) return (
-                          <div className="flex-1 font-display tracking-widest uppercase text-center opacity-30 text-[16px] flex items-center justify-center">
-                            Select Image
-                          </div>
-                        );
-                        if (selItem.parameters?.analyzedOpticalParams || selItem.type === 'generated') {
-                          return (
-                            <button 
-                              onClick={handleGenerate}
-                              disabled={isGenerating || activeTab === 'result'}
-                              className="relative flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium text-[16px] flex items-center justify-center"
-                            >
-                              <span className="block">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
-                            </button>
-                          );
-                        }
-                        return (
-                          <button 
-                            onClick={() => analyzeViewpoint(selItem.src, selItem.id)}
-                            disabled={isAnalyzing}
-                            className="flex-1 font-display tracking-widest uppercase hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-30 font-medium text-[16px] flex items-center justify-center"
-                          >
-                            {isAnalyzing ? 'Analyzing...' : 'Analyze'}
-                          </button>
-                        );
-                      })()}
+                      
+                      <div className="flex-1 h-9 rounded-full bg-white/50 dark:bg-black/50 border border-black/10 dark:border-white/10 flex items-center justify-center backdrop-blur-sm">
+                        <span className="font-display tracking-widest uppercase text-center font-medium text-[13px]">
+                          CHANGE VIEWPOINT
+                        </span>
+                      </div>
 
                       <button 
-                        onClick={() => setActiveTab(prev => prev === 'create' ? 'result' : 'create')} 
-                        disabled={!selectedItemId}
-                        className="px-3 hover:bg-black/10 dark:hover:bg-white/10 transition-colors border-l border-black/10 dark:border-white/10 flex items-center justify-center disabled:opacity-20 disabled:cursor-not-allowed"
-                        title="Toggle View"
+                         onClick={() => {
+                          const currentIndex = canvasItems.findIndex(i => i.id === selectedItemId);
+                          if (currentIndex !== -1 && currentIndex < canvasItems.length - 1) setSelectedItemId(canvasItems[currentIndex + 1].id);
+                        }} 
+                        disabled={!selectedItemId || canvasItems.findIndex(i => i.id === selectedItemId) >= canvasItems.length - 1}
+                        className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 transition-colors disabled:opacity-20 flex-shrink-0"
                       >
                         <ChevronRight size={16} />
                       </button>
                     </div>
                   </div>
-                
-                {activeTab === 'create' ? (
-                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1 min-h-0 overflow-hidden">
-                    <div className="flex-shrink min-h-0 max-h-[240px] aspect-square mx-auto w-full">
+
+                  {/* V124 Master Box Container (Scrollable) */}
+                  <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0 flex flex-col gap-5 custom-scrollbar">
+
+                    {/* V124 Site Plan Indicator (Replaced with new minimal version) */}
+                    <div className="flex-shrink-0 w-full aspect-square mx-auto pointer-events-none rounded-[20px] bg-white/30 dark:bg-black/30 border border-black/5 dark:border-white/5">
                       <SitePlanDiagram 
                         angle={ANGLES[angleIndex]} 
-                        lens={LENSES[lensIndex].value} 
-                        sitePlanImage={sitePlanImage} 
                         isAnalyzing={isAnalyzing}
+                        lens={LENSES[lensIndex].value}
+                        sitePlanImage={sitePlanImage}
                       />
                     </div>
                     
-                    <div className={`flex flex-col mt-2 space-y-3 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
-                      {/* Controls */}
+                    {/* Sliders */}
+                    <div className={`flex flex-col space-y-4 px-1 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
                       <div>
                         <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
                           <span className="opacity-70 uppercase tracking-widest">Angle</span>
@@ -1665,50 +1661,60 @@ ${layerC_property}
                         <input type="range" min="0" max={TIMES.length-1} step="1" value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-5 px-5 pb-5 pt-0 flex-1 overflow-y-auto min-h-0">
-                    <div className="font-mono text-xs leading-normal tracking-widest space-y-4">
-                      {/* V89: Viewpoint details (SCENARIO, ANGLE, ALTITUDE, PROMPT) removed from Report View */}
-                      {/* V80: PHASE 3 Detailed Parameters Rendering */}
-                      {elevationParams && typeof elevationParams === 'object' && (
-                        <div className="mt-6 border-t border-black/10 dark:border-white/10 pt-4 space-y-4">
-                          <span className="opacity-50 block font-display uppercase tracking-widest text-xs">PHASE 3: Protocol DNA</span>
-                          <div className="space-y-3">
-                            {Object.entries(elevationParams).map(([groupKey, groupVal]: [string, any]) => {
-                              if (typeof groupVal !== 'object' || groupVal === null) return null;
-                              return (
-                                <div key={groupKey} className="text-[10px]">
-                                  <span className="opacity-50 block uppercase mb-1">{groupKey.replace(/^[0-9]+_/, '').replace(/_/g, ' ')}</span>
-                                  <div className="pl-2 border-l border-black/20 dark:border-white/20 space-y-1">
-                                    {Object.entries(groupVal).map(([key, val]) => (
-                                      <div key={key} className="flex justify-between items-start gap-2">
-                                        <span className="opacity-60 capitalize whitespace-nowrap">{key.replace(/_/g, ' ')}</span>
-                                        <span className="text-right truncate flex-1">
-                                          {typeof val === 'object' && val !== null 
-                                            ? JSON.stringify(val).replace(/["{}]/g, '').replace(/,/g, ', ') 
-                                            : String(val)}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
+
+                    {/* V124 ANALYSIS REPORT Area (Inside Master Box) */}
+                    <div className="font-mono text-xs leading-normal tracking-widest space-y-3 border border-black/10 dark:border-white/10 bg-white/30 dark:bg-black/30 p-4 rounded-[20px] flex-1">
+                      <span className="opacity-50 block font-display uppercase tracking-widest text-xs mb-3">ANALYSIS REPORT</span>
+                      {elevationParams && typeof elevationParams === 'object' ? (
+                        <div className="space-y-4">
+                          {Object.entries(elevationParams).map(([groupKey, groupVal]: [string, any]) => {
+                            if (typeof groupVal !== 'object' || groupVal === null) return null;
+                            return (
+                              <div key={groupKey} className="text-[10px]">
+                                <span className="opacity-50 block uppercase mb-1.5">{groupKey.replace(/^[0-9]+_/, '').replace(/_/g, ' ')}</span>
+                                <div className="pl-3 border-l-2 border-black/10 dark:border-white/10 space-y-1.5">
+                                  {Object.entries(groupVal).map(([key, val]) => (
+                                    <div key={key} className="flex justify-between items-start gap-2">
+                                      <span className="opacity-60 capitalize whitespace-nowrap">{key.replace(/_/g, ' ')}</span>
+                                      <span className="text-right flex-1 break-words">
+                                        {typeof val === 'object' && val !== null 
+                                          ? JSON.stringify(val).replace(/["{}]/g, '').replace(/,/g, ', ') 
+                                          : String(val)}
+                                      </span>
+                                    </div>
+                                  ))}
                                 </div>
-                              );
-                            })}
-                          </div>
+                              </div>
+                            );
+                          })}
                         </div>
+                      ) : (
+                        <div className="opacity-30 text-center py-6">Pending...</div>
                       )}
                     </div>
                   </div>
-                )}
 
-                {/* BOTTOM FOOTER */}
-                <div className="p-5 mt-auto border-t border-black/10 dark:border-white/10">
-                  <p className="font-mono text-[9px] opacity-40 text-center tracking-tighter">
-                    © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
-                  </p>
+                  {/* V124 GENERATE BUTTON (External to Scroll Box, Bottom Locked) */}
+                  <div className="px-4 pb-2 pt-2 shrink-0">
+                    <button 
+                      onClick={handleGenerate}
+                      disabled={isGenerating || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
+                      className="relative w-full h-[44px] rounded-full hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 shadow-sm"
+                      style={{
+                        boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
+                      }}
+                    >
+                       <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
+                    </button>
+                  </div>
+
+                  {/* BOTTOM FOOTER */}
+                  <div className="p-3 mt-auto shrink-0 border-t border-black/10 dark:border-white/10">
+                    <p className="font-mono text-[9px] opacity-40 text-center tracking-tighter">
+                      © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
+                    </p>
+                  </div>
                 </div>
-              </div>
             </aside>
           </div>
         </div>

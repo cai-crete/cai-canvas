@@ -40,12 +40,13 @@
 
 ---
 
-## **PHASE 2. ARCHITECTURAL INFERENCE (심층 설계 추론 및 파라미터화)**
+## **PHASE 2. ARCHITECTURAL INFERENCE (심층 설계 추론 및 렌더링 파라미터화)**
 단순 시점 분석을 넘어 보이지 않는 면(Blind Spot)을 채우기 위한 백그라운드 프로세싱(Protocol A).
 
 > **[Protocol Engine 자동 발동 — `System Protocol Image to Elevation-v2.2`]**
 >
-> PHASE 2가 개시되는 순간, **`System Protocol Image to Elevation-v2.2`** (Protocol A: Architectural Logic Engine)가 전체 실행 엔진으로 자동 발동됩니다.
+> **이미지 업로드가 완료되면 별도 클릭 없이 PHASE 2가 즉시 개시(Trigger)됩니다.**
+> 직후, **`gemini-3.1-flash-image-preview`** 모델을 가동하여 업로드 이미지를 그대로 재생성(Regeneration)한 뒤, 이를 원본으로 대체하여 이후 프로세스의 순수성(Purity)을 확보합니다. 이와 동시에 **`System Protocol Image to Elevation-v2.2`** (Protocol A: Architectural Logic Engine)가 전체 실행 엔진으로 자동 발동됩니다.
 >
 > 이 프로토콜은 입력된 2D 이미지의 가시권 상수를 스캔하고, 내부 조닝(Zoning) 로직을 통해 비가시권 영역의 3D 절대 좌표 및 속성 데이터를 결정론적으로 역설계합니다. 형태(Geometry)와 속성(Property)의 1:1 매칭 원칙(ensemble_pair)에 따라 연산을 분리하여 AI Hallucination을 원천 차단합니다.
 >
