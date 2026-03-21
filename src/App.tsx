@@ -1257,7 +1257,7 @@ ${layerC_property}
           <div 
             className={`
               absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2
-              bg-white/90 dark:bg-black/90 dark:border-white/50 pointer-events-auto
+              bg-white/90 dark:bg-black/90 border border-black/20 dark:border-white/20 pointer-events-auto
               transition-all duration-300 rounded-full py-2.5 w-11 backdrop-blur-sm
             `}
             style={{
@@ -1306,7 +1306,7 @@ ${layerC_property}
           <div 
             className={`
               absolute bottom-[12px] z-30 flex items-center
-              bg-white/90 dark:bg-black/90 pointer-events-auto
+              bg-white/90 dark:bg-black/90 border border-black/20 dark:border-white/20 pointer-events-auto
               transition-all duration-500 ease-in-out rounded-full overflow-hidden h-11 backdrop-blur-sm
             `}
             style={{
@@ -1513,11 +1513,7 @@ ${layerC_property}
                     {isGenerating && selectedItemId === item.id && (
                       <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
                         <Loader2 
-                          className="animate-spin text-black/50" 
-                          style={{ 
-                            width: `${28.8 / (canvasZoom / 100)}px`, 
-                            height: `${28.8 / (canvasZoom / 100)}px` 
-                          }}
+                          className="animate-spin text-white" 
                         />
                       </div>
                     )}
@@ -1566,7 +1562,7 @@ ${layerC_property}
             {/* FLOATING PANEL - V59: Target Transparency (10% / 90% opacity) */}
             <div className={`w-full h-full transition-all duration-500 ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
               <aside 
-                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/90 dark:bg-black/90 backdrop-blur-sm"
+                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/90 dark:bg-black/90 backdrop-blur-sm border border-black/20 dark:border-white/20"
                 style={{
                    boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
                 }}
