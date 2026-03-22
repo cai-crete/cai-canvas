@@ -1285,7 +1285,7 @@ ${layerC_property}
             {/* 1. 도구 모드 (Select / Pan) */}
             <button 
               onClick={() => setCanvasMode('select')}
-              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'select' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'select' ? 'bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Select Mode"
             >
               <MousePointer2 size={18} />
@@ -1294,7 +1294,7 @@ ${layerC_property}
               onClick={() => {
                 setCanvasMode('pan');
               }}
-              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'pan' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'pan' ? 'bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Pan Mode"
             >
               <Hand size={18} />
@@ -1378,7 +1378,7 @@ ${layerC_property}
                 onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
                 className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${
                   isRightPanelOpen 
-                    ? 'bg-black text-white dark:bg-white dark:text-black' 
+                    ? 'bg-black/10 text-black dark:bg-white/10 dark:text-white' 
                     : 'hover:bg-black/5 dark:hover:bg-white/5'
                 }`}
                 title="Toggle Panel"
