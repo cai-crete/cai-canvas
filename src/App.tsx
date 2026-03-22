@@ -1708,8 +1708,8 @@ ${layerC_property}
                   </div>
 
                   {/* BOTTOM FOOTER */}
-                  <div className="p-3 mt-auto shrink-0 border-t border-black/10 dark:border-white/10">
-                    <p className="font-mono text-[9px] opacity-40 text-center tracking-tighter">
+                  <div className="p-3 mt-auto shrink-0">
+                    <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
                       © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
                     </p>
                   </div>
