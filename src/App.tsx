@@ -474,11 +474,16 @@ export default function App() {
       setHistoryStates(prev => [...prev, canvasItems]);
       setRedoStates([]);
 
+      // V125: Tablet/Touch Interaction Fix - Require second tap to drag if using touch
+      const isAlreadySelected = selectedItemId === clickedItem.id;
       setSelectedItemId(clickedItem.id);
-      isDraggingItemRef.current = true;
-      setIsDraggingItem(true);
-      dragOffsetRef.current = { x: coords.x - clickedItem.x, y: coords.y - clickedItem.y };
-      e.currentTarget.setPointerCapture(e.pointerId);
+
+      if (e.pointerType === 'mouse' || isAlreadySelected) {
+        isDraggingItemRef.current = true;
+        setIsDraggingItem(true);
+        dragOffsetRef.current = { x: coords.x - clickedItem.x, y: coords.y - clickedItem.y };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
       return;
     }
 
@@ -1576,10 +1581,7 @@ ${layerC_property}
             {/* FLOATING PANEL - V59: Target Transparency (10% / 90% opacity) */}
             <div className={`w-full h-full transition-all duration-500 ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
               <aside 
-                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/90 dark:bg-black/90 backdrop-blur-sm border border-black/10 dark:border-white/10"
-                style={{
-                   boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
-                }}
+                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10"
               >
                 {/* Sidebar Content Wrapper */}
                 <div className={`flex flex-col h-full transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
@@ -1699,10 +1701,7 @@ ${layerC_property}
                     <button 
                       onClick={handleGenerate}
                       disabled={isGenerating || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
-                      className="relative w-full h-[44px] rounded-full hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 shadow-sm"
-                      style={{
-                        boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
-                      }}
+                      className="relative w-full h-[44px] rounded-full hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10"
                     >
                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
                     </button>
