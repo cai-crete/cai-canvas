@@ -29,12 +29,13 @@
 ---
 
 ## **PHASE 1. INGESTION (이미지 주입 및 기본 시점 분석)**
-사용자가 원본 이미지의 [분석] 버튼을 클릭하는 시점. 여기서부터 AI 엔진(Protocol A)이 부분 가동됩니다.
+사용자가 이미지를 업로드하는 즉시 시스템이 개입하여 분석을 시작하는 자동화 단계입니다. 별도의 버튼 클릭 없이 PHASE 2와 연계되어 실행됩니다.
 
 1.  **Image Upload Event**: 사용자가 .jpg, .png 등 건축물 이미지를 업로드.
 2.  **State Reset**: 기존의 생성된 이미지(generatedImage) 및 배치도(sitePlanImage)를 초기화(Null)하고 UI를 갱신.
-3.  **Basic Viewpoint Analysis (분석 시작)**: 
+3.  **Automatic Viewpoint Analysis (분석 개시)**: 
     *   **Engine:** `gemini-3.1-pro-preview` (MODEL_ANALYSIS)
+    *   **Trigger**: 이미지 업로드 완료 시 즉시 실행.
     *   입력된 이미지의 "정면(06:00) 기준점" 대비 현재 관찰자의 시점 변수(Camera Angle, Altitude, Lens 설정)를 판단하여 상태(State) 값으로 업데이트.
     *   옵션 패널(Right Sidebar)이 자동으로 열리며 분석 중 텍스트가 표시됨.
 
@@ -50,8 +51,8 @@
 >
 > 이 프로토콜은 입력된 2D 이미지의 가시권 상수를 스캔하고, 내부 조닝(Zoning) 로직을 통해 비가시권 영역의 3D 절대 좌표 및 속성 데이터를 결정론적으로 역설계합니다. 형태(Geometry)와 속성(Property)의 1:1 매칭 원칙(ensemble_pair)에 따라 연산을 분리하여 AI Hallucination을 원천 차단합니다.
 >
-> **발동 흐름:**
-> `PHASE 1 분석 완료` → `Protocol A 초기화` → `Phase 1: Visual Diagnosis & Element Extraction` → `Phase 2: Context Inference & Zoning` → `Phase 3: Blind Spot Reconstruction` → `Phase 4: Design Specification Output (AEPL JSON 패키징)` → `Protocol B 이관`
+> **발동 흐름 (UX Flow):**
+> `이미지 업로드` → `원본 즉시 캔버스 출력` → `Background Regeneration 시작` → `재생성 완료 시 원본 소스 교체(Replace)` → `Protocol A 분석 자동 트리거` → `Phase 1~4 순차 실행` → `Protocol B 이관`
 
 1.  **System Protocol Image to Elevation-v2.2 연동**: 가시권 이미지에서 건축적 당위성을 역산하는 4단계 파이프라인 가동.
     *   **Phase 1: Visual Diagnosis & Element Extraction** — 가시권 진단 및 건축 요소(층고, 기둥 경간, PBR 물성, 창면적비) 추출, 대지 유형 판정.
