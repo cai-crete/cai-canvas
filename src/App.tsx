@@ -1285,7 +1285,7 @@ ${layerC_property}
             {/* 1. 도구 모드 (Select / Pan) */}
             <button 
               onClick={() => setCanvasMode('select')}
-              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'select' ? 'w-8 h-8 bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'select' ? 'w-8 h-8 bg-black text-white dark:bg-white dark:text-black' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Select Mode"
             >
               <MousePointer2 size={18} />
@@ -1294,7 +1294,7 @@ ${layerC_property}
               onClick={() => {
                 setCanvasMode('pan');
               }}
-              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'pan' ? 'w-8 h-8 bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'pan' ? 'w-8 h-8 bg-black text-white dark:bg-white dark:text-black' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Pan Mode"
             >
               <Hand size={18} />
@@ -1378,7 +1378,7 @@ ${layerC_property}
                 onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
                 className={`aspect-square flex items-center justify-center rounded-full transition-all ${
                   isRightPanelOpen 
-                    ? 'w-8 h-8 bg-black/10 text-black dark:bg-white/10 dark:text-white' 
+                    ? 'w-8 h-8 bg-black text-white dark:bg-white dark:text-black' 
                     : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'
                 }`}
                 title="Toggle Panel"
@@ -1532,7 +1532,8 @@ ${layerC_property}
                     {isGenerating && selectedItemId === item.id && (
                       <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
                         <Loader2 
-                          className="animate-spin text-white" 
+                          size={72}
+                          className="animate-spin text-black/40 dark:text-white/40" 
                         />
                       </div>
                     )}
@@ -1701,7 +1702,7 @@ ${layerC_property}
                     <button 
                       onClick={handleGenerate}
                       disabled={isGenerating || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
-                      className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black/10 enabled:dark:bg-white/10 enabled:hover:bg-black/20 enabled:dark:hover:bg-white/20"
+                      className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                     >
                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
                     </button>
