@@ -606,41 +606,11 @@ export default function App() {
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64Image = reader.result as string;
-        
-        setIsAnalyzing(true);
-        let finalBase64 = base64Image;
 
-        // V124: Auto-Regenerate image using gemini-3.1-flash-image-preview
-        try {
-          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-          const response = await ai.models.generateContent({
-            model: IMAGE_GEN,
-            contents: {
-              parts: [
-                { inlineData: { data: base64Image.split(',')[1], mimeType: base64Image.split(';')[0].split(':')[1] } },
-                { text: "Recreate and enhance this architectural image exactly as it is without altering its geometry or perspective." }
-              ]
-            }
-          });
-
-          if (response.candidates && response.candidates[0]?.content?.parts) {
-            for (const part of response.candidates[0].content.parts) {
-              if (part.inlineData) {
-                finalBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                console.log("[V124] Image successfully regenerated via", IMAGE_GEN);
-                break;
-              }
-            }
-          }
-        } catch (error) {
-          console.error("[V124] Image regeneration failed, falling back to original:", error);
-        }
-
-        // Load image to get dimensions for initial canvas item
+        // V128: Step 1 — Load original image to get dimensions, then show it immediately on canvas
         const img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
           const newItemId = `item-${Date.now()}`;
-          // Calculate Y position: Place below the bottom-most item if exists
           let newY = -img.height / 2;
           let newX = -img.width / 2;
           
@@ -651,8 +621,6 @@ export default function App() {
             const bottomMostItem = canvasItems.reduce((prev, current) => 
               (prev.y + prev.height > current.y + current.height) ? prev : current
             );
-            
-            // Place below the bottom-most item, aligned to the leftmost X
             newX = leftMostItem.x;
             newY = bottomMostItem.y + bottomMostItem.height + 40;
           }
@@ -660,13 +628,13 @@ export default function App() {
           const newItem: CanvasItem = {
             id: newItemId,
             type: 'upload',
-            src: finalBase64,
+            src: base64Image, // Show original immediately
             x: newX,
             y: newY,
             width: img.width,
             height: img.height,
-            motherId: newItemId, // V74: acts as its own mother
-            parameters: null // V74: filled post-analysis
+            motherId: newItemId,
+            parameters: null
           };
 
           setHistoryStates(prevH => [...prevH, canvasItems]);
@@ -674,11 +642,43 @@ export default function App() {
           setSelectedItemId(newItemId);
           setSitePlanImage(null);
           setActiveTab('create');
+          setIsAnalyzing(true);
 
-          // V124: Auto-trigger Phase 2 Analysis
+          // V128: Step 2 — Background regeneration, then replace src of existing item
+          let finalBase64 = base64Image;
+          try {
+            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+            const response = await ai.models.generateContent({
+              model: IMAGE_GEN,
+              contents: {
+                parts: [
+                  { inlineData: { data: base64Image.split(',')[1], mimeType: base64Image.split(';')[0].split(':')[1] } },
+                  { text: "Recreate and enhance this architectural image exactly as it is without altering its geometry or perspective." }
+                ]
+              }
+            });
+
+            if (response.candidates && response.candidates[0]?.content?.parts) {
+              for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                  finalBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                  console.log("[V128] Image regenerated. Replacing canvas item src:", newItemId);
+                  // V128: Step 3 — Replace original with regenerated image in-place
+                  setCanvasItems(prev => prev.map(item =>
+                    item.id === newItemId ? { ...item, src: finalBase64 } : item
+                  ));
+                  break;
+                }
+              }
+            }
+          } catch (error) {
+            console.error("[V128] Regeneration failed, keeping original:", error);
+          }
+
+          // V124/V128: Auto-trigger Phase 2 Analysis after regeneration
           analyzeViewpoint(finalBase64, newItemId);
         };
-        img.src = finalBase64;
+        img.src = base64Image;
       };
       reader.readAsDataURL(file);
     }
@@ -1285,7 +1285,7 @@ ${layerC_property}
             {/* 1. 도구 모드 (Select / Pan) */}
             <button 
               onClick={() => setCanvasMode('select')}
-              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'select' ? 'bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'select' ? 'w-8 h-8 bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Select Mode"
             >
               <MousePointer2 size={18} />
@@ -1294,7 +1294,7 @@ ${layerC_property}
               onClick={() => {
                 setCanvasMode('pan');
               }}
-              className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${canvasMode === 'pan' ? 'bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'pan' ? 'w-8 h-8 bg-black/10 text-black dark:bg-white/10 dark:text-white' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
               title="Pan Mode"
             >
               <Hand size={18} />
@@ -1376,10 +1376,10 @@ ${layerC_property}
             <div className="flex px-1">
               <button 
                 onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-                className={`w-9 h-9 aspect-square flex items-center justify-center rounded-full transition-colors ${
+                className={`aspect-square flex items-center justify-center rounded-full transition-all ${
                   isRightPanelOpen 
-                    ? 'bg-black/10 text-black dark:bg-white/10 dark:text-white' 
-                    : 'hover:bg-black/5 dark:hover:bg-white/5'
+                    ? 'w-8 h-8 bg-black/10 text-black dark:bg-white/10 dark:text-white' 
+                    : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'
                 }`}
                 title="Toggle Panel"
               >
@@ -1701,7 +1701,7 @@ ${layerC_property}
                     <button 
                       onClick={handleGenerate}
                       disabled={isGenerating || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
-                      className="relative w-full h-[44px] rounded-full hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10"
+                      className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black/10 enabled:dark:bg-white/10 enabled:hover:bg-black/20 enabled:dark:hover:bg-white/20"
                     >
                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
                     </button>
