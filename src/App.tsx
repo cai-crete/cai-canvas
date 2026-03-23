@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, Footprints } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 
@@ -133,8 +133,7 @@ const SitePlanDiagram = ({ angle, isAnalyzing }: { angle: string, lens: number, 
       {/* Analyzing Overlay */}
       {isAnalyzing && (
         <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-30 transition-colors duration-300 rounded-full">
-          <Loader2 size={32} className="animate-spin mb-3 text-black dark:text-white" />
-          <p className="font-display text-[10px] uppercase tracking-widest text-center px-4">Analyzing...</p>
+          <Loader2 size={32} className="animate-spin text-black dark:text-white" />
         </div>
       )}
     </div>
@@ -284,8 +283,9 @@ export default function App() {
       setLensIndex(item.parameters.lensIndex);
       setTimeIndex(item.parameters.timeIndex);
 
-      // 2. Analysis Data (Shared) -> Prefer Mother's analysis for consistency in the project
-      const analysisSource = motherItem?.parameters || item.parameters;
+      // V145: Independent Yet Identical Data Ownership
+      // Instead of borrowing from motherItem, the generated image inherently holds identical copies of the data.
+      const analysisSource = item.parameters;
       
       setAnalyzedOpticalParams(analysisSource.analyzedOpticalParams || null);
       setElevationParams(analysisSource.elevationParams || null);
@@ -321,13 +321,13 @@ export default function App() {
   }, [theme]);
 
   // --- Handlers ---
-  const ZOOM_STEPS_BUTTON = [10, 25, 50, 75, 100, 125, 150];
+  const ZOOM_STEPS_BUTTON = [10, 25, 50, 75, 100, 125, 150, 175, 200];
 
   const zoomStep = (dir: 1 | -1) => {
     setCanvasZoom(prev => {
       if (dir === 1) {
         const next = ZOOM_STEPS_BUTTON.find(v => v > prev);
-        return next !== undefined ? next : 150;
+        return next !== undefined ? next : 200;
       } else {
         const next = [...ZOOM_STEPS_BUTTON].reverse().find(v => v < prev);
         return next !== undefined ? next : 10;
@@ -395,7 +395,7 @@ export default function App() {
     // Web Zoom (No Ctrl needed as per user request for Miro-style)
     e.preventDefault();
     const zoomFactor = -e.deltaY * 0.1;
-    setCanvasZoom(prev => Math.min(Math.max(prev + zoomFactor, 10), 150));
+    setCanvasZoom(prev => Math.min(Math.max(prev + zoomFactor, 10), 200));
   };
 
   const getCanvasCoords = (clientX: number, clientY: number) => {
@@ -470,6 +470,13 @@ export default function App() {
     );
 
     if (clickedItem) {
+      // V145: 내부 검증을 위한 개발자 도구(F12) 콘솔 출력
+      console.log("=============== [V145 내부 검증 가이드] 현재 선택된 이미지 정보 ===============");
+      console.log("선택된 이미지 ID:", clickedItem.id, "| 분류 타입:", clickedItem.type);
+      console.log("이 이미지가 실제로 소유하고 있는 완전한 파라미터 정보:");
+      console.log("▶ item.parameters:", clickedItem.parameters);
+      console.log("===================================================================");
+
       // V113: Save state before moving item
       setHistoryStates(prev => [...prev, canvasItems]);
       setRedoStates([]);
@@ -477,6 +484,11 @@ export default function App() {
       // V125: Tablet/Touch Interaction Fix - Require second tap to drag if using touch
       const isAlreadySelected = selectedItemId === clickedItem.id;
       setSelectedItemId(clickedItem.id);
+      
+      // V141: If a library was already open, transition it to the new item instead of losing it
+      if (openLibraryItemId) {
+        setOpenLibraryItemId(clickedItem.id);
+      }
 
       if (e.pointerType === 'mouse' || isAlreadySelected) {
         isDraggingItemRef.current = true;
@@ -488,8 +500,11 @@ export default function App() {
     }
 
     // 3. Background click in Select Mode → Panning
-    setSelectedItemId(null);
-    setOpenLibraryItemId(null); // V81: Close library on background click
+    // V135: Prevent deactivation if a library is open, allowing pan without closing/deselecting
+    if (!openLibraryItemId) {
+      setSelectedItemId(null);
+      setOpenLibraryItemId(null);
+    }
     isDraggingPanRef.current = true;
     setIsDraggingPan(true);
     dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
@@ -611,8 +626,12 @@ export default function App() {
         const img = new Image();
         img.onload = async () => {
           const newItemId = `item-${Date.now()}`;
-          let newY = -img.height / 2;
-          let newX = -img.width / 2;
+          // V139: Mother image scales to 50%
+          const scaledWidth = img.width * 0.5;
+          const scaledHeight = img.height * 0.5;
+          
+          let newY = -scaledHeight / 2;
+          let newX = -scaledWidth / 2;
           
           if (canvasItems.length > 0) {
             const leftMostItem = canvasItems.reduce((prev, current) => 
@@ -631,8 +650,8 @@ export default function App() {
             src: base64Image, // Show original immediately
             x: newX,
             y: newY,
-            width: img.width,
-            height: img.height,
+            width: scaledWidth,
+            height: scaledHeight,
             motherId: newItemId,
             parameters: null
           };
@@ -659,24 +678,34 @@ export default function App() {
             });
 
             if (response.candidates && response.candidates[0]?.content?.parts) {
+              let foundRegen = false;
               for (const part of response.candidates[0].content.parts) {
                 if (part.inlineData) {
                   finalBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                  console.log("[V128] Image regenerated. Replacing canvas item src:", newItemId);
-                  // V128: Step 3 — Replace original with regenerated image in-place
-                  setCanvasItems(prev => prev.map(item =>
-                    item.id === newItemId ? { ...item, src: finalBase64 } : item
-                  ));
+                  foundRegen = true;
                   break;
                 }
               }
+              // V152: Void 1 — Hard stop if regeneration returned no image
+              if (!foundRegen) throw new Error("FAIL: Regeneration output missing inlineData");
+              
+              setCanvasItems(prev => prev.map(item =>
+                item.id === newItemId ? { ...item, src: finalBase64 } : item
+              ));
+            } else {
+              throw new Error("FAIL: Regeneration response empty");
             }
           } catch (error) {
-            console.error("[V128] Regeneration failed, keeping original:", error);
+            console.error("[V152/V128] Regeneration FAIL:", error);
+            // Abort everything on FAIL
+            setCanvasItems(prev => prev.filter(item => item.id !== newItemId));
+            setIsAnalyzing(false);
+            alert("이미지 재생성 단계에서 무결성 검증 실패(FAIL)가 발생했습니다. 프로세스를 중단합니다.");
+            return;
           }
 
           // V124/V128: Auto-trigger Phase 2 Analysis after regeneration
-          analyzeViewpoint(finalBase64, newItemId);
+          await analyzeViewpoint(finalBase64, newItemId);
         };
         img.src = base64Image;
       };
@@ -684,10 +713,20 @@ export default function App() {
     }
   };
 
+  const validateAEPL = (data: any) => {
+    // V152: Void 3 — AEPL Schema Validator
+    if (!data.elevation_parameters) return false;
+    const ep = data.elevation_parameters;
+    const requiredBlocks = ['1_macro_geometry', '3_material', '4_fenestration'];
+    for (const block of requiredBlocks) {
+      if (!ep[block] || Object.keys(ep[block]).length === 0) return false;
+    }
+    return true;
+  };
+
   const analyzeViewpoint = async (base64Image: string, itemId?: string) => {
     setIsAnalyzing(true);
     try {
-      // Phase 1 & 2: Structural & Viewpoint Analysis using gemini-3.1-pro-preview
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       
       const analysisPrompt = `
@@ -709,7 +748,6 @@ export default function App() {
           "lens_index": "0 to 7 (index of LENSES constant)",
           "time_index": "0 to 7 (index of TIMES constant)",
           "site_plan_hint": "Description of building footprint",
-          "elevation_parameters": {
           "elevation_parameters": {
             "1_macro_geometry": {
               "mass_typology": "Enum: Single_Block / L_Shape / U_Shape / Stepped / Cantilevered",
@@ -739,7 +777,6 @@ export default function App() {
               "spawn_hvac_unit": true/false
             }
           }
-          }
         }
       `;
 
@@ -759,24 +796,32 @@ export default function App() {
 
         const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
         const jsonStr = responseText.match(/\{[\s\S]*\}/)?.[0];
-        if (!jsonStr) throw new Error("No JSON returned from model");
+        if (!jsonStr) throw new Error("FAIL: No JSON returned from analysis");
 
         const data = JSON.parse(jsonStr);
+        if (!validateAEPL(data)) throw new Error("FAIL: AEPL Schema Incomplete");
+
         const aIdx = ANGLES.indexOf(data.angle);
-        if (aIdx !== -1) setAngleIndex(aIdx);
-        if (data.altitude_index !== undefined) setAltitudeIndex(Number(data.altitude_index));
-        if (data.lens_index !== undefined) setLensIndex(Number(data.lens_index));
-        if (data.time_index !== undefined) setTimeIndex(Number(data.time_index));
-        
         const analyzedOpt = {
           angle: data.angle,
           altitude: ALTITUDES[Number(data.altitude_index) || 0]?.label || 'N/A',
           lens: LENSES[Number(data.lens_index) || 0]?.label || 'N/A',
           time: TIMES[Number(data.time_index) || 0] || 'N/A'
         };
-        setAnalyzedOpticalParams(analyzedOpt);
+
+        // V152: Void 2 — Atomic State Update. Store results in local constant instead of immediate state sync.
+        const sitePlanBase64 = await generateSitePlan(base64Image, data.elevation_parameters, itemId);
         
-        // Update the newly uploaded Mother item with the analyzed data
+        // Final Atomic Update (Only if generateSitePlan also PASSes)
+        if (aIdx !== -1) setAngleIndex(aIdx);
+        if (data.altitude_index !== undefined) setAltitudeIndex(Number(data.altitude_index));
+        if (data.lens_index !== undefined) setLensIndex(Number(data.lens_index));
+        if (data.time_index !== undefined) setTimeIndex(Number(data.time_index));
+        
+        setAnalyzedOpticalParams(analyzedOpt);
+        setElevationParams(data.elevation_parameters || null);
+        setSitePlanImage(sitePlanBase64); // Atomic SitePlan Update
+
         const newParams = {
           angleIndex: aIdx !== -1 ? aIdx : 4,
           altitudeIndex: Number(data.altitude_index) || 2,
@@ -784,7 +829,7 @@ export default function App() {
           timeIndex: Number(data.time_index) || 2,
           analyzedOpticalParams: analyzedOpt,
           elevationParams: data.elevation_parameters || null,
-          sitePlanImage: null,
+          sitePlanImage: sitePlanBase64,
           architecturalSheetImage: null
         };
 
@@ -792,133 +837,122 @@ export default function App() {
           item.id === itemId ? { ...item, parameters: newParams } : item
         ));
         
-        // After parameter analysis, trigger site plan generation with extracted params for synthesis
-        await generateSitePlan(base64Image, data.elevation_parameters, itemId);
         return true;
       };
 
       try {
         await runAnalysis(ANALYSIS);
       } catch (primaryError) {
-        console.warn(`Primary model (${ANALYSIS}) failed, retrying with fallback...`, primaryError);
+        console.warn(`Primary analysis failed, retrying...`, primaryError);
         const success = await runAnalysis(ANALYSIS_FALLBACK);
-        if (!success) throw new Error("Fallback failed");
+        if (!success) throw new Error("FAIL: Fallback analysis also failed");
       }
 
-    } catch (err) {
-      console.warn("Analysis failed completely, using defaults", err);
-      alert("분석 API 호출이 실패하거나 할당량(Quota)을 초과했습니다. 기본값으로 세팅됩니다.");
+    } catch (err: any) {
+      console.error("[V152] Analysis FAIL Chain:", err);
+      alert(err.message || "분석 단계에서 검증 실패(FAIL)가 발생했습니다. 초기화합니다.");
+      // Rollback
+      setCanvasItems(prev => prev.filter(item => item.id !== itemId));
     } finally {
       setIsAnalyzing(false);
     }
   };
 
 
-  const generateSitePlan = async (base64Image: string, extractedParams?: any, itemId?: string) => {
-    // Note: In a real app, this would call an AI model to generate a top-down view.
-    // For this simulation, we'll use the same API structure but with a specific site-plan prompt.
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
+  const generateSitePlan = async (base64Image: string, extractedParams?: any, itemId?: string): Promise<string> => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
 
-      const sitePlanPrompt = `
-        [Architectural Multi-View Reference Sheet - System Protocol B Node 3 & 4]
-        [Reference: Architectural Top-down View Logic]
-        TASK: Generate a single integrated orthographic reference sheet containing 5 views (Top, Front, Right, Rear, Left) in a standard cross-layout.
-        
-        [CONTEXTUAL IMAGE SYNTHESIS]
-        - Clone and PRESERVE the exact textures, materials, and architectural geometry of the visible facades from the uploaded original image (Source of Truth).
-        - SYNTHESIZE the blind spots (Rear, unseen sides) logically, matching the established context and the following extracted parameters: ${contextualParamsStr}
-        - The result must be a holistic pixel-level generation combining Known (Source Image) + Unknown (AI Inferred Constraints).
-        
-        [ORIENTATION RULE]
-        - Align the FRONT Elevation to face the BOTTOM of the image layout.
-        - The Top View (Roof Plan) must logically correlate with this "Front = Bottom" orientation.
-        
-        LAYOUT SPECIFICATION (3x3 Grid):
-        - Row 1: [Empty | TOP (Roof Plan) | Empty]
-        - Row 2: [LEFT Elevation | FRONT Elevation | RIGHT Elevation]
-        - Row 3: [Empty | REAR Elevation | Empty]
-        
-        PROJECTION: True Orthographic (FOV=0), absolute zero perspective.
-        STYLE: Realistic architectural elevation style matching the original rendering or photo's texture, NO perspective effects.
-        BACKGROUND: Pure Transparent Background (Optical Null Space).
-        
-        CONSTRAINTS: All views must be perfectly aligned at the vertices. NO 3D perspective, NO text, NO labels.
-      `.trim();
+        const sitePlanPrompt = `
+          [Architectural Multi-View Reference Sheet - System Protocol B Node 3 & 4]
+          [Reference: Architectural Top-down View Logic]
+          TASK: Generate a single integrated orthographic reference sheet containing 5 views (Top, Front, Right, Rear, Left) in a standard cross-layout.
+          
+          [CONTEXTUAL IMAGE SYNTHESIS]
+          - Clone and PRESERVE the exact textures, materials, and architectural geometry of the visible facades from the uploaded original image (Source of Truth).
+          - SYNTHESIZE the blind spots (Rear, unseen sides) logically, matching the established context and the following extracted parameters: ${contextualParamsStr}
+          - The result must be a holistic pixel-level generation combining Known (Source Image) + Unknown (AI Inferred Constraints).
+          
+          [ORIENTATION RULE]
+          - Align the FRONT Elevation to face the BOTTOM of the image layout.
+          - The Top View (Roof Plan) must logically correlate with this "Front = Bottom" orientation.
+          
+          LAYOUT SPECIFICATION (3x3 Grid):
+          - Row 1: [Empty | TOP (Roof Plan) | Empty]
+          - Row 2: [LEFT Elevation | FRONT Elevation | RIGHT Elevation]
+          - Row 3: [Empty | REAR Elevation | Empty]
+          
+          PROJECTION: True Orthographic (FOV=0), absolute zero perspective.
+          STYLE: Realistic architectural elevation style matching the original rendering or photo's texture, NO perspective effects.
+          BACKGROUND: Pure Transparent Background (Optical Null Space).
+          
+          CONSTRAINTS: All views must be perfectly aligned at the vertices. NO 3D perspective, NO text, NO labels.
+        `.trim();
 
-      const base64Data = base64Image.split(',')[1];
-      const mimeType = base64Image.split(';')[0].split(':')[1];
+        const base64Data = base64Image.split(',')[1];
+        const mimeType = base64Image.split(';')[0].split(':')[1];
 
-      // Phase 2 (Sub-task): Multi-View Generation
-      const runGeneration = async (modelName: string) => {
-        const result = await ai.models.generateContent({
-          model: modelName,
-          contents: {
-            parts: [
-              { inlineData: { data: base64Data, mimeType: mimeType } },
-              { text: sitePlanPrompt },
-            ],
-          },
-        });
+        const runGeneration = async (modelName: string) => {
+          const result = await ai.models.generateContent({
+            model: modelName,
+            contents: {
+              parts: [
+                { inlineData: { data: base64Data, mimeType: mimeType } },
+                { text: sitePlanPrompt },
+              ],
+            },
+          });
 
-        if (result.candidates?.[0]?.content?.parts) {
-          for (const part of result.candidates[0].content.parts) {
-            if (part.inlineData) {
-              const fullSheetData = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-              setArchitecturalSheetImage(fullSheetData);
-              
-              // Extract TOP VIEW from the 3x3 cross layout grid
-              const img = new Image();
-              img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const cellW = img.width / 3;
-                const cellH = img.height / 3;
-                canvas.width = cellW;
-                canvas.height = cellH;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  // TOP View is at Row 0, Col 1
-                  ctx.drawImage(img, cellW, 0, cellW, cellH, 0, 0, cellW, cellH);
-                  const generatedSitePlan = canvas.toDataURL();
-                  setSitePlanImage(generatedSitePlan);
+          if (result.candidates?.[0]?.content?.parts) {
+            for (const part of result.candidates[0].content.parts) {
+              if (part.inlineData) {
+                const fullSheetData = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                
+                // V152: Void 4 — Image Sanity Check
+                if (fullSheetData.length < 5000) throw new Error("FAIL: Multi-view sheet image too small/invalid");
+                if (!fullSheetData.startsWith("data:image")) throw new Error("FAIL: Multi-view sheet invalid format");
 
-                  if (itemId) {
-                    setCanvasItems(prev => prev.map(item => {
-                      if (item.id === itemId && item.parameters) {
-                        return {
-                          ...item,
-                          parameters: {
-                            ...item.parameters,
-                            architecturalSheetImage: fullSheetData,
-                            sitePlanImage: generatedSitePlan
-                          }
-                        };
-                      }
-                      return item;
-                    }));
+                setArchitecturalSheetImage(fullSheetData);
+                
+                const img = new Image();
+                img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  const cellW = img.width / 3;
+                  const cellH = img.height / 3;
+                  canvas.width = cellW;
+                  canvas.height = cellH;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(img, cellW, 0, cellW, cellH, 0, 0, cellW, cellH);
+                    const generatedSitePlan = canvas.toDataURL();
+                    resolve(generatedSitePlan); // PASS: Resolve with cropped top view
+                  } else {
+                    reject(new Error("FAIL: Canvas context creation failed"));
                   }
-                }
-              };
-              img.src = fullSheetData;
-              return true;
+                };
+                img.onerror = () => reject(new Error("FAIL: Image loading failed during cropping"));
+                img.src = fullSheetData;
+                return true;
+              }
             }
           }
-        }
-        return false;
-      };
+          return false;
+        };
 
-      try {
-        const success = await runGeneration(IMAGE_GEN);
-        if (!success) throw new Error("No image data returned from primary model");
-      } catch (primaryError) {
-        console.warn(`Primary model (${IMAGE_GEN}) failed, retrying with fallback...`, primaryError);
-        const success = await runGeneration(IMAGE_GEN_FALLBACK);
-        if (!success) throw new Error("Fallback failed");
+        try {
+          const success = await runGeneration(IMAGE_GEN);
+          if (!success) throw new Error("FAIL: No image data from primary model");
+        } catch (primaryError) {
+          console.warn(`Primary model (${IMAGE_GEN}) failed, retrying...`, primaryError);
+          const success = await runGeneration(IMAGE_GEN_FALLBACK);
+          if (!success) reject(new Error("FAIL: Fallback generation also failed"));
+        }
+      } catch (err) {
+        reject(err);
       }
-    } catch (err) {
-      console.warn("Multi-view generation failed", err);
-    }
+    });
   };
 
   // ---
@@ -954,47 +988,14 @@ export default function App() {
         return '04:30';
       };
 
-      const viewsToGenerate = [];
-
-      if (isFirstTime) {
-        const baseAngle = v0_angle === 'Unknown' ? '06:00' : v0_angle;
-        const cornerAngle = getAngle(baseAngle);
-        const perspectiveAngle = baseAngle === '06:00' ? cornerAngle : '06:00';
-        
-        viewsToGenerate.push({
-          name: "Bird's Eye View",
-          angle: cornerAngle,
-          altitude: "150m (Bird's eye view)",
-          lens: "32mm Aerial Lens",
-          distance: "approx 200m",
-          scenario: "Aerial / Bird's eye",
-        });
-        viewsToGenerate.push({
-          name: "Perspective View",
-          angle: perspectiveAngle,
-          altitude: "1.6m (Street level)",
-          lens: "24mm Wide or 23mm Tilt-Shift Lens (Choose best)",
-          distance: "Standard",
-          scenario: "Street View",
-        });
-        viewsToGenerate.push({
-          name: "Street View",
-          angle: "AI Choice: 04:30 OR 07:30 (Select optimal visible corner based on 06:00)",
-          altitude: "1.6m (Street level)",
-          lens: "AI Choice: 35mm (Wide Standard) OR 45mm (Standard)",
-          distance: "approx 2m~5m",
-          scenario: "Street-Level Facade Detail (Lower facade visible on left or right)",
-        });
-      } else {
-        viewsToGenerate.push({
-          name: "Custom View",
-          angle: ANGLES[angleIndex],
-          altitude: ALTITUDES[altitudeIndex].label,
-          lens: LENSES[lensIndex].label,
-          distance: "Standard",
-          scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
-        });
-      }
+      const viewsToGenerate = [{
+        name: "Custom View",
+        angle: ANGLES[angleIndex],
+        altitude: ALTITUDES[altitudeIndex].label,
+        lens: LENSES[lensIndex].label,
+        distance: "Standard",
+        scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
+      }];
 
       let actualImageSrc = sourceItem.src;
       // V82: If generating from a generated image, we MUST use the mother image's src for the AI!
@@ -1014,18 +1015,18 @@ export default function App() {
         const layerB_viewpoint = `
 # ACTION PROTOCOL (MANDATORY EXECUTION WORKFLOW)
 ## Pre-Step: Reality Anchoring & Camera Delta Calculation
-- V₀ (Current Camera Position — AI Reverse-Engineered):
+- V₀ (Current Camera Position):
     Angle: ${v0_angle} o'clock | Altitude: ${v0_altitude} | Lens: ${v0_lens} | Time: ${v0_time}
-    This is the exact camera position from which the SOURCE IMAGE (IMAGE 1) was captured.
-- V₁ (Target Camera Position — User Command):
+    This is the exact camera position of IMAGE 1 (Source of Truth).
+- V₁ (Target Camera Position):
     Angle: ${viewConfig.angle} o'clock | Altitude: ${viewConfig.altitude} | Lens: ${viewConfig.lens} | Time: ${currentTime}
-- Δ Movement Vector: Orbit from ${v0_angle} → ${viewConfig.angle} | Altitude change: ${v0_altitude} → ${viewConfig.altitude}
-    Execute this as a precise Physical Camera Orbit around the immutable building geometry.
+- Δ Movement Vector: Orbit from ${v0_angle} → ${viewConfig.angle}
+    CRITICAL CONSTRAINT: You MUST execute this precise Physical Camera Orbit. DO NOT simply output the V₀ view again.
 
 ## Step 1: Coordinate Anchoring & Vector Calculation
-- Reference: Building main facade fixed at 06:00 (Front).
+- Clock-face Protocol: 06:00 = Front, 03:00 = Right, 09:00 = Left, 12:00 = Rear.
 - Target Vector: ${viewConfig.angle}
-- Altitude: ${viewConfig.altitude}
+- Constraint: The output image MUST clearly display the ${viewConfig.angle} view, utilizing IMAGE 2 as the geometric blueprint for that side.
 
 ## Step 2: Scenario Mapping & Optical Engineering
 - Scenario: ${viewConfig.scenario}
@@ -1035,17 +1036,19 @@ export default function App() {
         const layerC_property = elevationParams 
           ? `
 ## Step 5: Structural & Material Parameters (PHASE 2 AEPL Data — Immutable)
-- Mass Typology: ${elevationParams.mass_typology || 'N/A'}
-- Core Typology: ${elevationParams.core_typology || 'N/A'}
-- Base Material: ${elevationParams.base_material || 'N/A'}
-- Fenestration: ${elevationParams.fenestration_type || 'N/A'}
-- Balcony/Projection: ${elevationParams.has_balcony || 'False'}`
+- Mass Typology: ${elevationParams['1_macro_geometry']?.mass_typology || 'N/A'}
+- Roof Form: ${elevationParams['1_macro_geometry']?.roof_form || 'N/A'}
+- Core Typology: ${elevationParams['1_macro_geometry']?.core_typology || 'N/A'}
+- Standard Context: ${elevationParams['2_site_constraints']?.context_type || 'N/A'}
+- Base Material: ${elevationParams['3_material']?.base_material_type || 'N/A'}
+- Fenestration: ${elevationParams['4_fenestration']?.fenestration_type || 'N/A'}
+- Balcony/Projection: ${elevationParams['5_articulation']?.has_balcony || 'False'}`
           : '';
 
         const layerC_blindspot = `
-## Step 3: Layering & Blind Spot Inference
-- Perspective: ${viewConfig.angle === '06:00' ? '1-Point (face-on)' : '2-Point (corner/side)'}
-- Blind Spot Logic: If target is Rear (12:00) or hidden side, extract Design DNA from front, infer MEP/Service Door placement.
+## Step 3: Layering & Blind Spot Inference (Void Mitigation)
+- Context Void Mitigation: If orbiting to Rear (12:00) or Side, synchronize Foreground/Background. Spawn the adjacent building's mass scale and skyline contour as background context to prevent a white spatial void.
+- Geometry/Texture Void Mitigation: Adhere strictly to the "ensemble_pair" rule. DO NOT hallucinate arbitrary forms. Focus 100% of pixel generation on "Surface Texture" and "Dynamic AO (Ambient Occlusion)" for depth. Extract Design DNA from Front to logically place Service Doors/MEP details on blind spots.
 - Material Injection: Lock original textures. Apply Relighting only for new solar angle (${currentTime}).`;
 
         let activeElevationSlots = getElevationSlot(viewConfig.angle);
@@ -1138,14 +1141,18 @@ ${layerC_property}
                     const altValue = altMatch ? parseFloat(altMatch[1]) : 1.6;
                     const snapAltIndex = Math.max(0, ALTITUDES.findIndex(a => a.value === altValue));
 
+                    // V139: Generated image scales to 30%
+                    const generatedScaledWidth = img.width * 0.3;
+                    const generatedScaledHeight = img.height * 0.3;
+
                     const newGenItem: CanvasItem = {
                       id: `gen-${Date.now()}-${Math.floor(Math.random()*1000)}`,
                       type: 'generated',
                       src: generatedSrc,
                       x: 0,
                       y: sourceItem.y,
-                      width: (img.width / img.height) * sourceItem.height,
-                      height: sourceItem.height,
+                      width: generatedScaledWidth,
+                      height: generatedScaledHeight,
                       motherId: sourceItem.motherId || sourceItem.id,
                       parameters: {
                         angleIndex:    snapAngleIndex,
@@ -1161,33 +1168,27 @@ ${layerC_property}
                     
                     setCanvasItems(prev => {
                       setHistoryStates(prevH => [...prevH, prev]);
-                      
-                      // V102: Place to the right of the rightmost image in the current row
-                      let maxEdgeX = sourceItem.x + sourceItem.width;
-                      for (const item of prev) {
-                        if (Math.abs(item.y - sourceItem.y) < 10) {
-                            const rightEdge = item.x + item.width;
-                            if (rightEdge > maxEdgeX) maxEdgeX = rightEdge;
-                        }
-                      }
-                      
-                      let currentX = maxEdgeX + 40;
-                      let currentY = sourceItem.y;
-                      let hasOverlap = true;
-                      while (hasOverlap) {
-                        hasOverlap = false;
-                        for (const item of prev) {
-                          if (
-                            currentX < item.x + item.width &&
-                            currentX + newGenItem.width > item.x &&
-                            currentY < item.y + item.height &&
-                            currentY + newGenItem.height > item.y
-                          ) {
-                            currentX = item.x + item.width + 40;
-                            hasOverlap = true;
-                            break;
-                          }
-                        }
+
+                      // V139: Determine placement
+                      const motherItem = sourceItem;
+                      const siblingsInPrev = prev.filter(i => i.type === 'generated' && (i.motherId === motherItem.id || i.motherId === motherItem.motherId));
+                      const isFirstGenerated = siblingsInPrev.length === 0;
+
+                      let currentX: number;
+                      let currentY: number;
+
+                      if (isFirstGenerated) {
+                        // V143: First generated image: right of mother, bottom aligned to 25% down the mother's height
+                        currentX = motherItem.x + motherItem.width + 120;
+                        currentY = (motherItem.y + motherItem.height * 0.25) - generatedScaledHeight;
+                      } else {
+                        // V146: Subsequent images: vertical stack below the bottom-most sibling
+                        const bottomMostSibling = siblingsInPrev.reduce((prevBot, curr) => 
+                          (curr.y + curr.height > prevBot.y + prevBot.height) ? curr : prevBot,
+                          siblingsInPrev[0]
+                        );
+                        currentX = bottomMostSibling.x;
+                        currentY = bottomMostSibling.y + bottomMostSibling.height + 96;
                       }
 
                       newGenItem.x = currentX;
@@ -1234,7 +1235,10 @@ ${layerC_property}
   const currentSourceItem = selectedItemId ? canvasItems.find(item => item.id === selectedItemId) : (canvasItems.length > 0 ? canvasItems[0] : null);
   const isSelectedItemUpload = currentSourceItem?.type === 'upload';
   const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === currentSourceItem?.id || (i.motherId === undefined && i.id === currentSourceItem?.id)));
-  const areSlidersLocked = isSelectedItemUpload && !hasInitialViews;
+  
+  // V139: Lock sliders and button when analyzing, generating, or when generated image is selected
+  const isGeneratedItemSelected = currentSourceItem?.type === 'generated';
+  const areSlidersLocked = isAnalyzing || isGenerating || isGeneratedItemSelected;
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-white dark:bg-black text-black dark:text-white font-sans transition-colors duration-300 selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black overflow-hidden">
@@ -1275,11 +1279,11 @@ ${layerC_property}
           <div 
             className={`
               absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2
-              bg-white/90 dark:bg-black/90 border border-black/10 dark:border-white/10 pointer-events-auto
+              bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 pointer-events-auto
               transition-all duration-300 rounded-full py-2.5 w-11 backdrop-blur-sm
             `}
             style={{
-              boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
+              boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
             }}
           >
             {/* 1. 도구 모드 (Select / Pan) */}
@@ -1324,7 +1328,7 @@ ${layerC_property}
           <div 
             className={`
               absolute bottom-[12px] z-30 flex items-center
-              bg-white/90 dark:bg-black/90 border border-black/10 dark:border-white/10 pointer-events-auto
+              bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 pointer-events-auto
               transition-all duration-500 ease-in-out rounded-full overflow-hidden h-11 backdrop-blur-sm
             `}
             style={{
@@ -1333,7 +1337,7 @@ ${layerC_property}
               whiteSpace: 'nowrap',
               paddingLeft: '6px',
               paddingRight: '6px',
-              boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
+              boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
             }}
           >
             {/* 1. 이미지 업로드 버튼 */}
@@ -1439,6 +1443,32 @@ ${layerC_property}
                   draggable={false}
                 />
                 
+                {/* V136: Hide labels if zoom is 20% or less */}
+                {(() => {
+                  if (canvasZoom <= 20) return null;
+                  const labelText = item.type === 'upload'
+                    ? 'ORIGINAL'
+                    : (() => {
+                        const siblings = canvasItems.filter(i => i.type === 'generated' && (i.motherId === item.motherId || i.motherId === item.id));
+                        const viewIdx = siblings.findIndex(s => s.id === item.id);
+                        return `VIEWPOINT ${String(viewIdx + 1).padStart(2, '0')}`;
+                      })();
+                  return (
+                    <div
+                      className="absolute bottom-0 left-1/2 pointer-events-none z-[25] origin-top"
+                      style={{ 
+                        transform: `translateX(-50%) translateY(100%) scale(${1 / (canvasZoom / 100)})`,
+                        paddingTop: '12px',
+                        lineHeight: 1
+                      }}
+                    >
+                      <span className="font-mono text-[15px] tracking-widest uppercase opacity-40 whitespace-nowrap">
+                        {labelText}
+                      </span>
+                    </div>
+                  );
+                })()}
+                
                 {/* Selection Overlay (Blue Border & Circle Handles) */}
                 {selectedItemId === item.id && (
                   <div 
@@ -1452,10 +1482,10 @@ ${layerC_property}
                     <div 
                       className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] px-1.5 rounded-full pointer-events-auto transition-all duration-300`}
                       style={{
-                        top: `-${56 / (canvasZoom / 100)}px`, // Adjusted top margin
+                        top: `-${56 / (canvasZoom / 100)}px`,
                         right: 0,
                         height: `${44 / (canvasZoom / 100)}px`,
-                        boxShadow: 'inset 1px 1px 2px rgba(255, 255, 255, 1), inset -1px -1px 2px rgba(0, 0, 0, 0.2)'
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
                       }}
                       onPointerDown={(e) => e.stopPropagation()}
                     >
@@ -1528,12 +1558,13 @@ ${layerC_property}
                       </div>
                     )}
 
-                    {/* V87: Loader directly on the selected generating item */}
+                    {/* V133: Walking Footprints Loader (Staggered animation) */}
+                    {/* V134: Reverted to circular Loader2 (Black) */}
                     {isGenerating && selectedItemId === item.id && (
                       <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
                         <Loader2 
-                          size={72}
-                          className="animate-spin text-black/40 dark:text-white/40" 
+                          size={42}
+                          className="animate-spin text-white" 
                         />
                       </div>
                     )}
@@ -1665,8 +1696,8 @@ ${layerC_property}
                       </div>
                     </div>
 
-                    {/* V124 ANALYSIS REPORT Area (Inside Master Box) */}
-                    <div className="font-mono text-xs leading-normal tracking-widest space-y-3 border border-black/10 dark:border-white/10 bg-white/30 dark:bg-black/30 p-4 rounded-[20px] flex-1">
+                    {/* V133 ANALYSIS REPORT Area (Fixed width, break-words, internal scroll) */}
+                    <div className="font-mono text-xs leading-normal tracking-widest space-y-3 border border-black/10 dark:border-white/10 bg-white/30 dark:bg-black/30 p-4 rounded-[20px] flex-1 overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap">
                       <span className="opacity-50 block font-display uppercase tracking-widest text-xs mb-3">ANALYSIS REPORT</span>
                       {elevationParams && typeof elevationParams === 'object' ? (
                         <div className="space-y-4">
@@ -1701,7 +1732,7 @@ ${layerC_property}
                   <div className="px-4 pb-2 pt-2 shrink-0">
                     <button 
                       onClick={handleGenerate}
-                      disabled={isGenerating || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
+                      disabled={areSlidersLocked || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
                       className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                     >
                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">{isGenerating ? 'GENERATING...' : 'GENERATE'}</span>
