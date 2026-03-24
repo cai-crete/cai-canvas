@@ -1,3 +1,5 @@
+// [V172 PHASE 2 - UNLINKED] Zustand store for canvas state
+// [V172 PHASE 2 - UNLINKED] React Flow Canvas Component
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { CanvasItem } from '../types/canvas';

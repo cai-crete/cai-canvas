@@ -1910,9 +1910,12 @@ ${layerC_property}
                   </div>
 
                   {/* BOTTOM FOOTER */}
-                  <div className="p-3 mt-auto shrink-0">
+                  <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
                     <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
                       © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
+                    </p>
+                    <p className="font-mono text-[9px] opacity-20 text-center uppercase tracking-widest">
+                      V172-R1 (RESTORED)
                     </p>
                   </div>
                 </div>
