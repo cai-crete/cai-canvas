@@ -207,6 +207,7 @@ export default function App() {
   // V189: Store multiple starting positions for drag
   const clickedItemStartPositionsRef = useRef<Record<string, { x: number, y: number }>>({});
   const pendingToggleItemIdRef = useRef<string | null>(null);
+  const isTwoFingerActiveRef = useRef(false); // V198: Block lasso on two-finger touch
   // V157: AbortController for canceling generation
   const abortControllerRef = useRef<AbortController | null>(null);
   // Keep State for render (cursor CSS)
@@ -541,8 +542,9 @@ export default function App() {
       return;
     }
 
-    // 3. Background click -> Lasso
     // 3. No Item Clicked -> Start Lasso + Close Artboard
+    // V198: Block lasso if two-finger touch is active
+    if (isTwoFingerActiveRef.current) return;
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
     setOpenLibraryItemId(null);
@@ -659,6 +661,7 @@ export default function App() {
   // --- Tablet Touch Handlers ---
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
+      isTwoFingerActiveRef.current = true; // V198: Block lasso
       setCanvasMode('pan');
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -698,9 +701,10 @@ export default function App() {
   };
 
   const handleTouchEnd = () => {
+    isTwoFingerActiveRef.current = false; // V198: Reset lasso block
     lastTouchDist.current = null;
     lastTouchCenter.current = null;
-    setCanvasMode('select'); // Reset to select mode after two-finger gesture
+    setCanvasMode('select');
   };
 
   const toggleTheme = () => {
@@ -1559,29 +1563,24 @@ ${layerC_property}
             className="absolute inset-0 transition-transform duration-75 ease"
             style={{ 
               transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom / 100})`,
-              transformOrigin: '0 0'
+              transformOrigin: 'center'
             }}
           >
-            {/* V195: Connection Lines (Background Layer) */}
+            {/* V195/V198: Connection Lines (Background Layer - fixed SVG coordinates) */}
             <svg
-              className="absolute inset-0 pointer-events-none overflow-visible"
-              style={{ zIndex: 5, pointerEvents: 'none' }}
+              className="absolute pointer-events-none overflow-visible"
+              style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, zIndex: 5, pointerEvents: 'none', overflow: 'visible' }}
             >
-              <defs>
-                <filter id="shadow">
-                  <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.1" />
-                </filter>
-              </defs>
               {canvasItems.map((item) => {
                 if (!item.motherId) return null;
                 const mother = canvasItems.find(i => i.id === item.motherId);
                 if (!mother) return null;
                 
-                // V195.1: Mother Right-Center to Derived Left-Center
-                const x1 = `calc(50% + ${mother.x + mother.width}px)`;
-                const y1 = `calc(50% + ${mother.y + mother.height / 2}px)`;
-                const x2 = `calc(50% + ${item.x}px)`;
-                const y2 = `calc(50% + ${item.y + item.height / 2}px)`;
+                // V198: Use numeric coordinates (SVG does not support CSS calc())
+                const x1 = mother.x + mother.width;
+                const y1 = mother.y + mother.height / 2;
+                const x2 = item.x;
+                const y2 = item.y + item.height / 2;
 
                 return (
                   <line
