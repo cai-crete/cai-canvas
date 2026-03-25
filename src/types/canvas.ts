@@ -16,6 +16,12 @@ export interface CanvasItem {
     analyzedOpticalParams?: any | null;
     elevationParams?: any | null;
     sitePlanImage?: string | null;
-    architecturalSheetImage?: string | null;
+    elevationImages?: {
+      front: string | null;
+      right: string | null;
+      rear: string | null;
+      left: string | null;
+      top: string | null;
+    } | null;
   } | null;
 }

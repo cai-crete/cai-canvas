@@ -176,14 +176,24 @@ interface CanvasItem {
     analyzedOpticalParams?: any | null;
     elevationParams?: any | null;
     sitePlanImage?: string | null;
-    architecturalSheetImage?: string | null;
+    elevationImages?: {
+      front: string | null;
+      right: string | null;
+      rear: string | null;
+      left: string | null;
+      top: string | null;
+    } | null;
   } | null;
 }
 
 export default function App() {
   // --- State ---
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const selectedItemIdsRef = useRef<string[]>([]);
+  const [isLassoing, setIsLassoing] = useState(false);
+  const isLassoingRef = useRef(false);
+  const [lassoPath, setLassoPath] = useState<{x: number, y: number}[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   
   // Drag & Resize Refs (Ref 기반 — stale closure 방지)
@@ -194,6 +204,9 @@ export default function App() {
   const dragStartRef = useRef({ x: 0, y: 0 });
   const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, itemX: 0, itemY: 0 });
   const resizeCornerRef = useRef({ dx: 1, dy: 1 });
+  // V189: Store multiple starting positions for drag
+  const clickedItemStartPositionsRef = useRef<Record<string, { x: number, y: number }>>({});
+  const pendingToggleItemIdRef = useRef<string | null>(null);
   // V157: AbortController for canceling generation
   const abortControllerRef = useRef<AbortController | null>(null);
   // Keep State for render (cursor CSS)
@@ -226,7 +239,13 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>(''); // V155: 단계 메시지
   const [sitePlanImage, setSitePlanImage] = useState<string | null>(null);
-  const [architecturalSheetImage, setArchitecturalSheetImage] = useState<string | null>(null);
+  const [elevationImages, setElevationImages] = useState<{
+    front: string | null;
+    right: string | null;
+    rear: string | null;
+    left: string | null;
+    top: string | null;
+  } | null>(null);
 
 
 
@@ -238,7 +257,7 @@ export default function App() {
 
   // V75: Item-bound Library State
   const [openLibraryItemId, setOpenLibraryItemId] = useState<string | null>(null);
-  const [artboardPage, setArtboardPage] = useState<1 | 2>(1); // V160: Artboard pagination
+  const [artboardPage, setArtboardPage] = useState<number>(1); // V180: Artboard pagination 1-5
 
   // V75: History State for Undo
   const [historyStates, setHistoryStates] = useState<CanvasItem[][]>([]);
@@ -253,7 +272,8 @@ export default function App() {
       setRedoStates(prev => [...prev, currentState]);
       setCanvasItems(previousState);
       setHistoryStates(prev => prev.slice(0, -1));
-      setSelectedItemId(null);
+      setSelectedItemIds([]);
+      selectedItemIdsRef.current = [];
     }
   };
 
@@ -265,7 +285,8 @@ export default function App() {
       setHistoryStates(prev => [...prev, currentState]);
       setCanvasItems(nextState);
       setRedoStates(prev => prev.slice(0, -1));
-      setSelectedItemId(null);
+      setSelectedItemIds([]);
+      selectedItemIdsRef.current = [];
     }
   };
 
@@ -283,7 +304,7 @@ export default function App() {
   // V74: Synchronize selected item's parameters to UI panels, and reset on deselect
   // V108: Hybrid Sync - Sliders (Independent) / Analysis Data (Shared from Mother)
   useEffect(() => {
-    if (!selectedItemId) {
+    if (selectedItemIds.length === 0) {
       // Background click -> Reset to default empty state
       setAngleIndex(4);
       setAltitudeIndex(2);
@@ -292,15 +313,11 @@ export default function App() {
       setAnalyzedOpticalParams(null);
       setElevationParams(null);
       setSitePlanImage(null);
-      setArchitecturalSheetImage(null);
+      setElevationImages(null);
       return;
     }
 
-    const item = canvasItems.find(i => i.id === selectedItemId);
-    const motherItem = (item?.type === 'generated' && item.motherId) 
-      ? canvasItems.find(i => i.id === item.motherId) 
-      : null;
-
+    const item = canvasItems.find(i => i.id === selectedItemIds[0]);
     if (item && item.parameters) {
       // 1. Viewpoint Sliders (Independent) -> Always from current item snapshot
       setAngleIndex(item.parameters.angleIndex);
@@ -309,16 +326,15 @@ export default function App() {
       setTimeIndex(item.parameters.timeIndex);
 
       // V145: Independent Yet Identical Data Ownership
-      // Instead of borrowing from motherItem, the generated image inherently holds identical copies of the data.
       const analysisSource = item.parameters;
       
       setAnalyzedOpticalParams(analysisSource.analyzedOpticalParams || null);
       setElevationParams(analysisSource.elevationParams || null);
       setSitePlanImage(analysisSource.sitePlanImage || null);
-      setArchitecturalSheetImage(analysisSource.architecturalSheetImage || null);
+      setElevationImages(analysisSource.elevationImages || null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedItemId]); // only trigger on selection change
+  }, [selectedItemIds]); // only trigger on selection change
 
   useEffect(() => {
     // Determine the scale based on a reference resolution (e.g., 1440x900 or 1920x1080)
@@ -398,8 +414,8 @@ export default function App() {
       setFocusMode('target');
     } else {
       // Focus Target (selected or last)
-      const targetItem = selectedItemId 
-        ? canvasItems.find(i => i.id === selectedItemId) 
+      const targetItem = selectedItemIds[0] 
+        ? canvasItems.find(i => i.id === selectedItemIds[0]) 
         : canvasItems[canvasItems.length - 1];
         
       if (targetItem) {
@@ -439,8 +455,14 @@ export default function App() {
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    const isUIInteraction = (e.target as HTMLElement).closest('.pointer-events-auto');
-    if (isUIInteraction) return;
+    const target = e.target as HTMLElement;
+    const isUIInteraction = target.closest('.pointer-events-auto');
+    // V187: Allow resize handles to bypass UI block
+    const isResizeHandle = target.classList.contains('resize-handle') || target.style.cursor?.endsWith('-resize');
+    if (isUIInteraction && !isResizeHandle) return;
+
+    // V184: Auto-collapse expanded search ONLY when NOT clicking UI elements (Canvas or Item clicks)
+    if (isSearchExpanded) setIsSearchExpanded(false);
 
     const coords = getCanvasCoords(e.clientX, e.clientY);
 
@@ -455,36 +477,22 @@ export default function App() {
 
     // --- Select Mode ---
 
-    // 1. Check Resize Handles first (if an item is selected)
-    if (selectedItemId) {
-      const item = canvasItems.find(i => i.id === selectedItemId);
+    // 1. Check Resize Handles first (if exactly one item is selected)
+    // Direct hit via data-dx/dy or distance
+    const resizeCorner = (target.closest('.resize-handle') as HTMLElement)?.dataset;
+    if (resizeCorner && selectedItemIds.length === 1) {
+      const selectedId = selectedItemIds[0];
+      const item = canvasItems.find(i => i.id === selectedId);
       if (item) {
-        const scale = canvasZoom / 100;
-        const hitRadius = 15 / scale;
+        setHistoryStates(prev => [...prev, canvasItems]);
+        setRedoStates([]);
 
-        // 4 corner definitions: position + resize direction multipliers
-        const corners = [
-          { x: item.x,              y: item.y,               dx: -1, dy: -1, cursor: 'nwse-resize' }, // top-left
-          { x: item.x + item.width, y: item.y,               dx:  1, dy: -1, cursor: 'nesw-resize' }, // top-right
-          { x: item.x,              y: item.y + item.height, dx: -1, dy:  1, cursor: 'nesw-resize' }, // bottom-left
-          { x: item.x + item.width, y: item.y + item.height, dx:  1, dy:  1, cursor: 'nwse-resize' }, // bottom-right
-        ];
-
-        for (const corner of corners) {
-          const dist = Math.hypot(coords.x - corner.x, coords.y - corner.y);
-          if (dist < hitRadius) {
-            // V113: Save state before resizing
-            setHistoryStates(prev => [...prev, canvasItems]);
-            setRedoStates([]);
-
-            isResizingItemRef.current = true;
-            setIsResizingItem(true);
-            resizeCornerRef.current = { dx: corner.dx, dy: corner.dy };
-            resizeStartRef.current = { x: coords.x, y: coords.y, width: item.width, height: item.height, itemX: item.x, itemY: item.y };
-            e.currentTarget.setPointerCapture(e.pointerId);
-            return;
-          }
-        }
+        isResizingItemRef.current = true;
+        setIsResizingItem(true);
+        resizeCornerRef.current = { dx: parseInt(resizeCorner.dx!), dy: parseInt(resizeCorner.dy!) };
+        resizeStartRef.current = { x: coords.x, y: coords.y, width: item.width, height: item.height, itemX: item.x, itemY: item.y };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
       }
     }
 
@@ -495,75 +503,93 @@ export default function App() {
     );
 
     if (clickedItem) {
-      // V145: 내부 검증을 위한 개발자 도구(F12) 콘솔 출력
-      console.log("=============== [V145 내부 검증 가이드] 현재 선택된 이미지 정보 ===============");
-      console.log("선택된 이미지 ID:", clickedItem.id, "| 분류 타입:", clickedItem.type);
-      console.log("이 이미지가 실제로 소유하고 있는 완전한 파라미터 정보:");
-      console.log("▶ item.parameters:", clickedItem.parameters);
-      console.log("===================================================================");
-
-      // V113: Save state before moving item
       setHistoryStates(prev => [...prev, canvasItems]);
       setRedoStates([]);
 
-      // V125: Tablet/Touch Interaction Fix - Require second tap to drag if using touch
-      const isAlreadySelected = selectedItemId === clickedItem.id;
-      setSelectedItemId(clickedItem.id);
+      let currentSelection = selectedItemIds;
+      if (!selectedItemIds.includes(clickedItem.id)) {
+        const newSelection = [...selectedItemIds, clickedItem.id];
+        setSelectedItemIds(newSelection);
+        selectedItemIdsRef.current = newSelection;
+        currentSelection = newSelection;
+        pendingToggleItemIdRef.current = null;
+      } else {
+        pendingToggleItemIdRef.current = clickedItem.id;
+      }
       
-      // V141: If a library was already open, transition it to the new item instead of losing it
-      if (openLibraryItemId) {
+      // V141: Transition library if open
+      if (openLibraryItemId && !currentSelection.includes(clickedItem.id)) {
         setOpenLibraryItemId(clickedItem.id);
       }
 
-      if (e.pointerType === 'mouse' || isAlreadySelected) {
-        isDraggingItemRef.current = true;
-        setIsDraggingItem(true);
-        dragOffsetRef.current = { x: coords.x - clickedItem.x, y: coords.y - clickedItem.y };
-        e.currentTarget.setPointerCapture(e.pointerId);
+      isDraggingItemRef.current = true;
+      setIsDraggingItem(true);
+      dragStartRef.current = { x: coords.x, y: coords.y };
+      
+      // V193: Deselect Toggle Logic Init
+      if (selectedItemIds.includes(clickedItem.id)) {
+        pendingToggleItemIdRef.current = clickedItem.id;
       }
+
+      clickedItemStartPositionsRef.current = currentSelection.reduce((acc, id) => {
+        const itm = canvasItems.find(i => i.id === id);
+        if (itm) acc[id] = { x: itm.x, y: itm.y };
+        return acc;
+      }, {} as Record<string, { x: number, y: number }>);
+      
+      e.currentTarget.setPointerCapture(e.pointerId);
       return;
     }
 
-    // 3. Background click in Select Mode → Panning
-    // V135: Prevent deactivation if a library is open, allowing pan without closing/deselecting
+    // 3. Background click -> Lasso
     if (!openLibraryItemId) {
-      setSelectedItemId(null);
+      setSelectedItemIds([]);
+      selectedItemIdsRef.current = [];
       setOpenLibraryItemId(null);
     }
-    isDraggingPanRef.current = true;
-    setIsDraggingPan(true);
-    dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
+    
+    setIsLassoing(true);
+    isLassoingRef.current = true;
+    setLassoPath([{ x: coords.x, y: coords.y }]);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     const coords = getCanvasCoords(e.clientX, e.clientY);
 
-    if (isDraggingPanRef.current) {
+    if (isLassoingRef.current) {
+      setLassoPath(prev => [...prev, coords]);
+    } else if (isDraggingPanRef.current) {
       setCanvasOffset({
         x: e.clientX - dragStartRef.current.x,
         y: e.clientY - dragStartRef.current.y
       });
-    } else if (isDraggingItemRef.current && selectedItemId) {
-      setCanvasItems(prev => prev.map(item => 
-        item.id === selectedItemId 
-          ? { ...item, x: coords.x - dragOffsetRef.current.x, y: coords.y - dragOffsetRef.current.y }
-          : item
-      ));
-    } else if (isResizingItemRef.current && selectedItemId) {
+    } else if (isDraggingItemRef.current && selectedItemIdsRef.current.length > 0) {
+      if (pendingToggleItemIdRef.current) {
+        pendingToggleItemIdRef.current = null;
+      }
+      const currentIds = selectedItemIdsRef.current;
+      const dx = coords.x - dragStartRef.current.x;
+      const dy = coords.y - dragStartRef.current.y;
+
+      setCanvasItems(prev => prev.map(item => {
+        if (!currentIds.includes(item.id)) return item;
+        const startPos = clickedItemStartPositionsRef.current[item.id];
+        return startPos ? { ...item, x: startPos.x + dx, y: startPos.y + dy } : item;
+      }));
+    } else if (isResizingItemRef.current && selectedItemIdsRef.current.length === 1) {
+      const selectedId = selectedItemIdsRef.current[0];
       const dx = coords.x - resizeStartRef.current.x;
       const dy = coords.y - resizeStartRef.current.y;
       const aspect = resizeStartRef.current.width / resizeStartRef.current.height;
 
       setCanvasItems(prev => prev.map(item => {
-        if (item.id !== selectedItemId) return item;
+        if (item.id !== selectedId) return item; 
 
-        // Width changes: right corner → expand right, left corner → expand left (flip sign)
         const rawDeltaW = dx * resizeCornerRef.current.dx;
         const newWidth = Math.max(resizeStartRef.current.width + rawDeltaW, 50);
         const newHeight = newWidth / aspect;
 
-        // Position: left corners move x; top corners move y
         const newX = resizeCornerRef.current.dx === -1
           ? resizeStartRef.current.itemX + (resizeStartRef.current.width - newWidth)
           : resizeStartRef.current.itemX;
@@ -576,13 +602,55 @@ export default function App() {
     }
   };
 
+  const isPointInPolygon = (point: {x: number, y: number}, polygon: {x: number, y: number}[]) => {
+    let isInside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      const intersect = ((yi > point.y) !== (yj > point.y)) &&
+                        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+      if (intersect) isInside = !isInside;
+    }
+    return isInside;
+  };
+
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (isLassoingRef.current) {
+      if (lassoPath.length > 3) {
+        const poly = lassoPath;
+        const newlySelected = canvasItems.filter(item => {
+          const corners = [
+            { x: item.x, y: item.y },
+            { x: item.x + item.width, y: item.y },
+            { x: item.x + item.width, y: item.y + item.height },
+            { x: item.x, y: item.y + item.height }
+          ];
+          return corners.some(c => isPointInPolygon(c, poly)) || 
+                 poly.some(p => p.x >= item.x && p.x <= item.x + item.width && p.y >= item.y && p.y <= item.y + item.height);
+        }).map(item => item.id);
+        
+        setSelectedItemIds(newlySelected);
+        selectedItemIdsRef.current = newlySelected;
+      }
+      setIsLassoing(false);
+      isLassoingRef.current = false;
+      setLassoPath([]);
+    }
+
+    if (pendingToggleItemIdRef.current) {
+      const tid = pendingToggleItemIdRef.current;
+      setSelectedItemIds(prev => prev.includes(tid) ? prev.filter(id => id !== tid) : [...prev, tid]);
+      pendingToggleItemIdRef.current = null;
+    }
+
     isDraggingPanRef.current = false;
     isDraggingItemRef.current = false;
     isResizingItemRef.current = false;
     setIsDraggingPan(false);
     setIsDraggingItem(false);
     setIsResizingItem(false);
+    pendingToggleItemIdRef.current = null;
+
     if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     }
@@ -610,12 +678,9 @@ export default function App() {
       const touch2 = e.touches[1];
       
       // 1. Pinch Zoom
-      const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
-      if (lastTouchDist.current !== null) {
-        const delta = (dist - lastTouchDist.current) * 0.5;
-        setCanvasZoom(prev => Math.min(Math.max(prev + delta, 10), 150));
-      }
-      lastTouchDist.current = dist;
+      const dist = (Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY) - (lastTouchDist.current || 0)) * 0.5;
+      setCanvasZoom(prev => Math.min(Math.max(prev + dist, 10), 150));
+      lastTouchDist.current = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
 
       // 2. Two-Finger Pan (Absolute screen coordinates for smoothness)
       const center = {
@@ -685,7 +750,7 @@ export default function App() {
 
           setHistoryStates(prevH => [...prevH, canvasItems]);
           setCanvasItems(prev => [...prev, newItem]);
-          setSelectedItemId(newItemId);
+          setSelectedItemIds([newItemId]);
           setSitePlanImage(null);
           setActiveTab('create');
           setIsAnalyzing(true);
@@ -859,8 +924,8 @@ export default function App() {
           item.id === itemId ? { ...item, parameters: newParams } : item
         ));
         
-        // After parameter analysis, trigger site plan generation with extracted params for synthesis
-        await generateSitePlan(base64Image, data.elevation_parameters, itemId);
+        // After parameter analysis, trigger individual elevation generation with extracted params
+        await generateElevations(base64Image, data.elevation_parameters, itemId);
         return true;
       };
 
@@ -882,50 +947,49 @@ export default function App() {
   };
 
 
-  const generateSitePlan = async (base64Image: string, extractedParams?: any, itemId?: string) => {
+  const generateElevations = async (base64Image: string, extractedParams?: any, itemId?: string) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
 
-      setAnalysisStep('입면 참조 시트 생성 중...'); // V155: Step 1
-
-      const sitePlanPrompt = `
-        [Architectural Multi-View Reference Sheet - System Protocol B Node 3 & 4]
-        [Reference: Architectural Top-down View Logic]
-        TASK: Generate a single integrated orthographic reference sheet containing 5 views (Top, Front, Right, Rear, Left) in a standard cross-layout.
-        
-        [CONTEXTUAL IMAGE SYNTHESIS]
-        - Clone and PRESERVE the exact textures, materials, and architectural geometry of the visible facades from the uploaded original image (Source of Truth).
-        - SYNTHESIZE the blind spots (Rear, unseen sides) logically, matching the established context and the following extracted parameters: ${contextualParamsStr}
-        - The result must be a holistic pixel-level generation combining Known (Source Image) + Unknown (AI Inferred Constraints).
-        
-        [ORIENTATION RULE]
-        - Align the FRONT Elevation to face the BOTTOM of the image layout.
-        - The Top View (Roof Plan) must logically correlate with this "Front = Bottom" orientation.
-        
-        LAYOUT SPECIFICATION (3x3 Grid):
-        - Row 1: [Empty | TOP (Roof Plan) | Empty]
-        - Row 2: [LEFT Elevation | FRONT Elevation | RIGHT Elevation]
-        - Row 3: [Empty | REAR Elevation | Empty]
-        
-        PROJECTION: True Orthographic (FOV=0), absolute zero perspective.
-        STYLE: Realistic architectural elevation style matching the original rendering or photo's texture, NO perspective effects.
-        BACKGROUND: Pure Transparent Background (Optical Null Space).
-        
-        CONSTRAINTS: All views must be perfectly aligned at the vertices. NO 3D perspective, NO text, NO labels.
-      `.trim();
+      setAnalysisStep('입면 데이터 생성 중...');
 
       const base64Data = base64Image.split(',')[1];
       const mimeType = base64Image.split(';')[0].split(':')[1];
 
-      // Phase 2 (Sub-task): Multi-View Generation
-      const runGeneration = async (modelName: string) => {
+      const viewConfigs = [
+        { key: 'front', label: 'FRONT', angle: '06:00' },
+        { key: 'right', label: 'RIGHT', angle: '03:00' },
+        { key: 'rear',  label: 'REAR',  angle: '12:00' },
+        { key: 'left',  label: 'LEFT',  angle: '09:00' },
+        { key: 'top',   label: 'TOP',   angle: 'TOP_VIEW' } 
+      ];
+
+      const generateOne = async (config: typeof viewConfigs[0]) => {
+        const prompt = `
+          [Architectural Elevation Generation Protocol - System Protocol V180]
+          TASK: Generate a single ${config.label} orthographic view of the building.
+          
+          [CONTEXT]
+          - Source Image: Use the uploaded photo for material/texture truth.
+          - Architectural Parameters: ${contextualParamsStr}
+          
+          [SPECIFICATION]
+          - View: ${config.label === 'TOP' ? 'Top-down Roof Plan' : `Elevation from ${config.angle} (o'clock)`}
+          - Projection: True Orthographic (FOV=0), zero perspective.
+          - Style: Realistic architectural rendering, matching the source texture.
+          - Background: Pure Transparent Background (Optical Null Space).
+          - Orientation: ${config.label === 'TOP' ? 'Align Front (06:00) to Bottom of frame' : 'Straight on elevation'}
+          
+          CONSTRAINTS: NO text, NO labels, No perspective distortion.
+        `.trim();
+
         const result = await ai.models.generateContent({
-          model: modelName,
+          model: IMAGE_GEN,
           contents: {
             parts: [
               { inlineData: { data: base64Data, mimeType: mimeType } },
-              { text: sitePlanPrompt },
+              { text: prompt },
             ],
           },
         });
@@ -933,63 +997,48 @@ export default function App() {
         if (result.candidates?.[0]?.content?.parts) {
           for (const part of result.candidates[0].content.parts) {
             if (part.inlineData) {
-              const fullSheetData = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-              setArchitecturalSheetImage(fullSheetData);
-              
-              // Extract TOP VIEW from the 3x3 cross layout grid
-              const img = new Image();
-              img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const cellW = img.width / 3;
-                const cellH = img.height / 3;
-                canvas.width = cellW;
-                canvas.height = cellH;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  // TOP View is at Row 0, Col 1
-                  ctx.drawImage(img, cellW, 0, cellW, cellH, 0, 0, cellW, cellH);
-                  const generatedSitePlan = canvas.toDataURL();
-                  setSitePlanImage(generatedSitePlan);
-
-                  if (itemId) {
-                    setCanvasItems(prev => prev.map(item => {
-                      if (item.id === itemId && item.parameters) {
-                        return {
-                          ...item,
-                          parameters: {
-                            ...item.parameters,
-                            architecturalSheetImage: fullSheetData,
-                            sitePlanImage: generatedSitePlan
-                          }
-                        };
-                      }
-                      return item;
-                    }));
-                  }
-                }
-              };
-              img.src = fullSheetData;
-              return true;
+              return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
             }
           }
         }
-        return false;
+        return null;
       };
 
-      try {
-        const success = await runGeneration(IMAGE_GEN);
-        if (!success) throw new Error("No image data returned from primary model");
-      } catch (primaryError) {
-        console.warn(`Primary model (${IMAGE_GEN}) failed, retrying with fallback...`, primaryError);
-        const success = await runGeneration(IMAGE_GEN_FALLBACK);
-        if (!success) throw new Error("Fallback failed");
+      // Generate all 4 views in parallel
+      const results = await Promise.all(viewConfigs.map(config => generateOne(config)));
+      
+      const newImages = {
+        front: results[0],
+        right: results[1],
+        rear:  results[2],
+        left:  results[3],
+        top:   results[4]
+      } as const;
+
+      setElevationImages(newImages);
+      // V180: Use TOP VIEW for sitePlanImage compat
+      if (newImages.top) setSitePlanImage(newImages.top);
+
+      if (itemId) {
+        setCanvasItems(prev => prev.map(item => {
+          if (item.id === itemId && item.parameters) {
+            return {
+              ...item,
+              parameters: {
+                ...item.parameters,
+                elevationImages: newImages,
+                sitePlanImage: newImages.top
+              }
+            };
+          }
+          return item;
+        }));
       }
 
-
     } catch (err) {
-      console.warn("Multi-view generation failed", err);
+      console.warn("Elevation generation failed", err);
     } finally {
-      setAnalysisStep(''); // V155: 단계 메시지 초기화
+      setAnalysisStep('');
     }
   };
 
@@ -998,8 +1047,8 @@ export default function App() {
   // Layer A (Geometry) + Layer B (5-IVSP Viewpoint) + Layer C (Property Slave)
   // ---
   const handleGenerate = async () => {
-    const sourceItem = selectedItemId 
-      ? canvasItems.find(item => item.id === selectedItemId) 
+    const sourceItem = selectedItemIds[0] 
+      ? canvasItems.find(item => item.id === selectedItemIds[0]) 
       : (canvasItems.length > 0 ? canvasItems[0] : null);
 
     if (!sourceItem) {
@@ -1169,15 +1218,14 @@ ${layerC_property}
             { inlineData: { data: base64Data, mimeType: mimeType } },
           ];
 
-          if (architecturalSheetImage) {
+          if (elevationImages) {
             for (const slot of activeElevationSlots) {
-              try {
-                const croppedElevation = await cropElevationFromSheet(architecturalSheetImage, slot);
-                const cropBase64 = croppedElevation.split(',')[1];
-                parts.push({ inlineData: { data: cropBase64, mimeType: 'image/png' } });
-                console.log(`[V70] Injecting cropped elevation: ${slot.label} (Row${slot.row}, Col${slot.col})`);
-              } catch (e) {
-                console.warn('[V70] Elevation crop failed:', slot.label, e);
+              const viewKey = slot.label.toLowerCase() as keyof typeof elevationImages;
+              const imgData = (elevationImages as any)[viewKey];
+              if (imgData) {
+                const imgBase64 = imgData.split(',')[1];
+                parts.push({ inlineData: { data: imgBase64, mimeType: 'image/png' } });
+                console.log(`[V180] Injecting direct elevation: ${slot.label}`);
               }
             }
           }
@@ -1251,7 +1299,7 @@ ${layerC_property}
                         analyzedOpticalParams: updatedOpticalParams, // V161 Update
                         elevationParams,
                         sitePlanImage,
-                        architecturalSheetImage
+                        elevationImages
                       }
                     };
                     
@@ -1285,7 +1333,7 @@ ${layerC_property}
 
                       return [...prev, newGenItem];
                     });
-                    setSelectedItemId(newGenItem.id);
+                    setSelectedItemIds([newGenItem.id]);
                     // Single view manually triggered changes instantly
                     // Batch view shouldn't swap tab wildly, but result is fine
                     if (!isFirstTime) setActiveTab('result');
@@ -1339,7 +1387,7 @@ ${layerC_property}
     }
   };
 
-  const currentSourceItem = selectedItemId ? canvasItems.find(item => item.id === selectedItemId) : (canvasItems.length > 0 ? canvasItems[0] : null);
+  const currentSourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : (canvasItems.length > 0 ? canvasItems[0] : null);
   const isSelectedItemUpload = currentSourceItem?.type === 'upload';
   const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === currentSourceItem?.id || (i.motherId === undefined && i.id === currentSourceItem?.id)));
   
@@ -1348,7 +1396,11 @@ ${layerC_property}
   const areSlidersLocked = isAnalyzing || isGenerating || isGeneratedItemSelected;
 
   return (
-    <div className="h-[100dvh] w-full flex flex-col bg-white dark:bg-black text-black dark:text-white font-sans transition-colors duration-300 selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black overflow-hidden">
+    <div className={`
+      h-[100dvh] w-full flex flex-col overflow-hidden select-none touch-none
+      bg-[#fcfcfc] dark:bg-[#050505] text-black dark:text-white
+      ${isLassoing ? 'cursor-crosshair' : ''}
+    `}>
       {/* HEADER */}
       <header className="h-[54px] shrink-0 flex justify-between items-center px-4 border-b border-black/10 dark:border-white/10 bg-white/90 dark:bg-black/90 backdrop-blur-sm transition-colors duration-300">
         <div className="flex items-center gap-3">
@@ -1367,12 +1419,7 @@ ${layerC_property}
         
         <section 
           ref={canvasRef as React.RefObject<HTMLElement>}
-          className={`flex-1 min-w-0 relative bg-[#fcfcfc] dark:bg-[#050505] overflow-hidden flex items-center justify-center transition-colors duration-300 touch-none
-            ${canvasMode === 'pan' 
-              ? (isDraggingPan ? 'cursor-grabbing' : 'cursor-grab') 
-              : (isDraggingItem ? 'cursor-move' : 'cursor-default')
-            }`}
-          onWheel={handleWheel}
+          className={`flex-1 relative overflow-hidden transition-all duration-300 ${canvasMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -1382,8 +1429,29 @@ ${layerC_property}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
+          {/* V114: SVG Overlay Layer for UI helpers (Lasso, etc) */}
+          <div className="absolute inset-0 pointer-events-none z-[100]">
+            {/* Lasso Selection SVG- V188: Corrected Coordinate System */}
+            {isLassoing && lassoPath.length > 1 && (
+              <svg
+                key="lasso-svg"
+                className="absolute inset-0 w-full h-full pointer-events-none z-[100]"
+                style={{ overflow: 'visible' }}
+              >
+                <g style={{ transform: `translate(${canvasOffset.x + window.innerWidth/2}px, ${canvasOffset.y + window.innerHeight/2}px) scale(${canvasZoom/100})` }}>
+                  <path
+                    d={`M ${lassoPath.map(p => `${p.x} ${p.y}`).join(' L ')} Z`}
+                    fill="rgba(30, 144, 255, 0.05)"
+                    stroke="rgb(30, 144, 255)"
+                    strokeWidth={2 / (canvasZoom/100)}
+                    strokeDasharray={`${4 / (canvasZoom/100)} ${4 / (canvasZoom/100)}`}
+                  />
+                </g>
+              </svg>
+            )}
+          </div>
 
-          {/* V173/V174: Integrated Left Tool Bar Area */}
+          {/* V173/V174: Integrated Left Tool Bar Area - Now FIXED OUTSIDE Scale Layer */}
           <div className="absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center pointer-events-none">
             {/* Main Control Bar */}
             <div 
@@ -1399,7 +1467,7 @@ ${layerC_property}
               {/* 1. 도구 모드 (Toggle: Select / Pan) */}
               <button 
                 onClick={() => setCanvasMode(canvasMode === 'select' ? 'pan' : 'select')}
-                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all bg-black text-white dark:bg-white dark:text-black`}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all bg-black text-white dark:bg-white dark:text-black hover:cursor-pointer`}
                 title={canvasMode === 'select' ? 'Switch to Pan Mode' : 'Switch to Select Mode'}
               >
                 {canvasMode === 'select' ? <MousePointer2 size={18} /> : <Hand size={18} />}
@@ -1411,7 +1479,7 @@ ${layerC_property}
               <button 
                 onClick={handleUndo}
                 disabled={historyStates.length === 0}
-                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${historyStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${historyStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5 hover:cursor-pointer'}`}
                 title="Undo"
               >
                 <Undo size={18} />
@@ -1419,7 +1487,7 @@ ${layerC_property}
               <button 
                 onClick={handleRedo}
                 disabled={redoStates.length === 0}
-                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${redoStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${redoStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5 hover:cursor-pointer'}`}
                 title="Redo"
               >
                 <Redo size={18} />
@@ -1431,10 +1499,10 @@ ${layerC_property}
               <div className="relative">
                 <button 
                   onClick={() => setIsSearchExpanded(!isSearchExpanded)} 
-                  className={`w-9 h-9 flex items-center justify-center rounded-full transition-all ${isSearchExpanded ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-all ${isSearchExpanded ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5 hover:cursor-pointer'}`}
                   title="Zoom Controls"
                 >
-                  <Search size={18} />
+                  <Search size={16} />
                 </button>
 
                 {/* Horizontal Expanded Bar */}
@@ -1446,7 +1514,7 @@ ${layerC_property}
                     {/* Fit Screen (Corners only icon) */}
                     <button 
                       onClick={handleFocus} 
-                      className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
+                      className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors hover:cursor-pointer" 
                       title="Fit to Screen"
                     >
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1458,9 +1526,9 @@ ${layerC_property}
 
                     {/* Zoom Level */}
                     <div className="flex items-center">
-                      <button onClick={() => zoomStep(-1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">−</button>
+                      <button onClick={() => zoomStep(-1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors hover:cursor-pointer">−</button>
                       <div className="min-w-[50px] text-center font-mono text-xs font-bold">{Math.round(canvasZoom)}%</div>
-                      <button onClick={() => zoomStep(1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">+</button>
+                      <button onClick={() => zoomStep(1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors hover:cursor-pointer">+</button>
                     </div>
                   </div>
                 )}
@@ -1472,22 +1540,30 @@ ${layerC_property}
             <div className="mt-[10px] flex flex-col items-center">
               <button 
                 onClick={() => fileInputRef.current?.click()} 
-                className="w-11 h-11 flex items-center justify-center rounded-full bg-black text-white hover:bg-neutral-800 transition-colors shadow-lg pointer-events-auto"
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-black text-white hover:bg-neutral-800 transition-colors shadow-lg pointer-events-auto hover:cursor-pointer"
                 title="Upload Image"
               >
-                <Plus size={22} />
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
+                  <line x1="16" y1="5" x2="22" y2="5" />
+                  <line x1="19" y1="2" x2="19" y2="8" />
+                  <path d="M7 16l3-3 2 2 4-4 3 3" />
+                </svg>
               </button>
               <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
           </div>
 
-          {/* Transform Wrapper */}
           <div 
+            className="absolute inset-0 transition-transform duration-75 ease"
             style={{ 
               transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom / 100})`,
-              transformOrigin: 'center center',
-              willChange: 'transform'
+              transformOrigin: 'center'
             }}
+          >
+
+          {/* Transform Wrapper */}
+          <div 
             className="w-full h-full flex items-center justify-center relative touch-none pointer-events-none"
           >
             {/* Infinite Composite Grid Background (5x5 Module, 60px/12px) */}
@@ -1519,9 +1595,10 @@ ${layerC_property}
                   top: `calc(50% + ${item.y}px)`,
                   width: item.width,
                   height: item.height,
-                  zIndex: selectedItemId === item.id ? 20 : 10,
+                  zIndex: selectedItemIds.includes(item.id) ? 20 : 10,
                   // Disable pointer events on items during PAN mode to allow background panning
-                  pointerEvents: canvasMode === 'pan' ? 'none' : 'auto'
+                  pointerEvents: canvasMode === 'pan' ? 'none' : 'auto',
+                  cursor: 'inherit'
                 }}
               >
                 <img 
@@ -1559,7 +1636,7 @@ ${layerC_property}
                 })()}
                 
                 {/* Selection Overlay (Blue Border & Circle Handles) */}
-                {selectedItemId === item.id && (
+                {selectedItemIds.includes(item.id) && (
                   <div 
                     className="absolute -inset-[1px] pointer-events-none border-[#1d4ed8] z-[30]"
                     style={{ 
@@ -1578,6 +1655,29 @@ ${layerC_property}
                       }}
                       onPointerDown={(e) => e.stopPropagation()}
                     >
+                      {/* V182: Add Copy (Duplicate) button at the leftmost */}
+                      <button 
+                        onClick={() => {
+                          const newItem: CanvasItem = {
+                            ...item,
+                            id: `${item.id}-copy-${Date.now()}`,
+                            x: item.x + 40,
+                            y: item.y + 40,
+                          };
+                          setCanvasItems(prev => [...prev, newItem]);
+                          setSelectedItemIds([newItem.id]);
+                        }}
+                        className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                        style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                        title="복제 (Duplicate)"
+                      >
+                        <svg width={12 / (canvasZoom / 100)} height={12 / (canvasZoom / 100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                      <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+
                       {item.type === 'generated' && (
                         /* V82: Add Download button for generated images */
                         <>
@@ -1593,13 +1693,15 @@ ${layerC_property}
                           <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                         </>
                       )}
+                      {/* V180: Library button enabled concurrently with GENERATE button */}
                       <button 
                         onClick={() => {
                           const isOpening = openLibraryItemId !== item.id;
                           setOpenLibraryItemId(isOpening ? item.id : null);
-                          if (isOpening) setArtboardPage(1); // V160: Reset page on open
+                          if (isOpening) setArtboardPage(1); 
                         }}
-                        className={`flex items-center justify-center transition-colors rounded-full ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                        disabled={!item.parameters?.analyzedOpticalParams && item.type !== 'generated'}
+                        className={`flex items-center justify-center transition-all rounded-full ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'} ${(!item.parameters?.analyzedOpticalParams && item.type !== 'generated') ? 'opacity-20 cursor-not-allowed' : 'opacity-100'}`}
                         style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
                         title="라이브러리 (아트보드)"
                       >
@@ -1611,7 +1713,7 @@ ${layerC_property}
                           setHistoryStates(prevH => [...prevH, canvasItems]);
                           setRedoStates([]);
                           setCanvasItems(prev => prev.filter(i => i.id !== item.id && i.motherId !== item.id));
-                          setSelectedItemId(null);
+                          setSelectedItemIds([]);
                         }}
                         className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
                         style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
@@ -1624,7 +1726,7 @@ ${layerC_property}
                     {/* V75/V81/V160: Item-bound Library Artboard */}
                     {openLibraryItemId === item.id && (
                       <div 
-                        className={`absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'}`}
+                        className={`absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'} cursor-default`}
                         style={{
                           left: 'calc(100% + 12px)',
                           top: 0,
@@ -1634,40 +1736,33 @@ ${layerC_property}
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
-                        {/* V160: Header & Tabs */}
+                        {/* V180: Header & Tabs */}
                         <div className="flex justify-between items-center mb-4 shrink-0">
-                          <span className="font-mono text-xs tracking-widest uppercase opacity-60">Phase 1 & 2 Analysis</span>
+                          <span className="font-mono text-xs tracking-widest uppercase font-bold text-black/70 dark:text-white/70">
+                            {artboardPage === 1 && "1. ANALYSIS REPORT"}
+                            {artboardPage === 2 && "2. FRONT VIEW (06:00)"}
+                            {artboardPage === 3 && "3. RIGHT VIEW (03:00)"}
+                            {artboardPage === 4 && "4. REAR VIEW (12:00)"}
+                            {artboardPage === 5 && "5. LEFT VIEW (09:00)"}
+                            {artboardPage === 6 && "6. TOP VIEW"}
+                          </span>
                           <div className="flex gap-2">
-                            <button 
-                              onClick={() => setArtboardPage(1)}
-                              className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-mono transition-colors ${artboardPage === 1 ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
-                            >
-                              1
-                            </button>
-                            <button 
-                              onClick={() => setArtboardPage(2)}
-                              className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-mono transition-colors ${artboardPage === 2 ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
-                            >
-                              2
-                            </button>
+                            {[1, 2, 3, 4, 5, 6].map((p) => (
+                              <button 
+                                key={p}
+                                onClick={() => setArtboardPage(p)}
+                                className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-mono transition-colors ${artboardPage === p ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
+                              >
+                                {p}
+                              </button>
+                            ))}
                           </div>
                         </div>
 
-                        {/* V160: Content */}
+                        {/* V180: Content */}
                         <div className="flex-1 w-full border border-black/10 dark:border-white/10 rounded-xl overflow-hidden bg-black/5 flex">
                           {artboardPage === 1 ? (
-                              /* Page 1: Architectural Sheet */
-                              item.parameters?.architecturalSheetImage ? (
-                                  <div className="relative w-full h-full flex flex-col items-center justify-center p-4">
-                                    <img src={item.parameters.architecturalSheetImage} className="max-w-full max-h-full object-contain mix-blend-multiply dark:mix-blend-screen" alt="Site Plan" />
-                                  </div>
-                              ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-center p-4">
-                                    <p className="font-mono opacity-40 uppercase tracking-widest text-[14px]">No Architectural Sheet Generated</p>
-                                  </div>
-                              )
-                          ) : (
-                              /* Page 2: Extracted Details */
+                              /* Page 1: Extracted Details (Analysis Report) */
                               <div className="flex w-full h-full">
                                  {/* Left: Source Image */}
                                  <div className="w-[45%] h-full p-4 border-r border-black/10 dark:border-white/10 flex flex-col">
@@ -1704,13 +1799,37 @@ ${layerC_property}
                                    )}
                                  </div>
                               </div>
+                          ) : (
+                             /* Pages 2-5: Elevation Views */
+                             <div className="relative w-full h-full flex items-center justify-center p-4">
+                               {(() => {
+                                 const views = item.parameters?.elevationImages;
+                                 let displayImg = null;
+                                 if (artboardPage === 2) displayImg = views?.front;
+                                 if (artboardPage === 3) displayImg = views?.right;
+                                 if (artboardPage === 4) displayImg = views?.rear;
+                                 if (artboardPage === 5) displayImg = views?.left;
+                                 if (artboardPage === 6) displayImg = views?.top;
+
+                                 if (displayImg) {
+                                   return <img src={displayImg} className="max-w-full max-h-full object-contain mix-blend-multiply dark:mix-blend-screen" alt={`Page ${artboardPage}`} />;
+                                 } else {
+                                   return (
+                                     <div className="flex flex-col items-center gap-4">
+                                       <Loader2 size={32} className="animate-spin text-black/20 dark:text-white/20" />
+                                       <p className="font-mono opacity-40 uppercase tracking-widest text-[12px]">Generating Elevation Data...</p>
+                                     </div>
+                                   );
+                                 }
+                               })()}
+                             </div>
                           )}
                         </div>
                       </div>
                     )}
 
                     {/* V156: Reverted to original white circular Loader2 */}
-                    {isGenerating && selectedItemId === item.id && (
+                    {isGenerating && selectedItemIds.includes(item.id) && (
                       <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
                         <Loader2 
                           size={42}
@@ -1720,10 +1839,10 @@ ${layerC_property}
                     )}
                     {/* Corner Handles (Scale Invariant Circles, 4-corner resizable) */}
                     {[
-                      { top: true,    left: true,  cursor: 'nwse-resize' }, // top-left
-                      { top: true,    right: true, cursor: 'nesw-resize' }, // top-right
-                      { bottom: true, left: true,  cursor: 'nesw-resize' }, // bottom-left
-                      { bottom: true, right: true, cursor: 'nwse-resize' }, // bottom-right
+                      { top: true,    left: true,  dx: -1, dy: -1, cursor: 'nwse-resize' }, // top-left
+                      { top: true,    right: true, dx:  1, dy: -1, cursor: 'nesw-resize' }, // top-right
+                      { bottom: true, left: true,  dx: -1, dy:  1, cursor: 'nesw-resize' }, // bottom-left
+                      { bottom: true, right: true, dx:  1, dy:  1, cursor: 'nwse-resize' }, // bottom-right
                     ].map((pos, idx) => {
                       const s = 1 / (canvasZoom / 100);
                       const size = 12 * s;
@@ -1743,16 +1862,15 @@ ${layerC_property}
                         pointerEvents: 'auto',
                         cursor: pos.cursor,
                       };
-                      return <div key={idx} style={style} />;
+                      return <div key={idx} className="resize-handle" data-dx={pos.dx} data-dy={pos.dy} style={style} />;
                     })}
                   </div>
                 )}
               </div>
             ))}
           </div>
-
-          {/* Loading Overlay Deleted in V82 */}
-        </section>
+        </div>
+      </section>
 
         {/* RIGHT SIDEBAR WRAPPER (V177: Detached Header & Minimal Footer) */}
         <div className="absolute top-0 right-0 h-full z-50 pointer-events-none flex justify-end p-[12px]">
@@ -1768,9 +1886,12 @@ ${layerC_property}
             `}>
               <button 
                 onClick={() => {
-                  const currentIndex = canvasItems.findIndex(i => i.id === selectedItemId);
+                  const currentIndex = canvasItems.findIndex(i => i.id === selectedItemIds[0]);
                   const nextIndex = (currentIndex + 1) % canvasItems.length;
-                  if (canvasItems[nextIndex]) setSelectedItemId(canvasItems[nextIndex].id);
+                  if (canvasItems[nextIndex]) {
+                    setSelectedItemIds([canvasItems[nextIndex].id]);
+                    selectedItemIdsRef.current = [canvasItems[nextIndex].id];
+                  }
                 }}
                 className={`
                   flex-1 h-full rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center justify-center backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto
@@ -1854,7 +1975,7 @@ ${layerC_property}
                   <div className="px-4 pb-2 pt-2 shrink-0">
                     <button 
                       onClick={isGenerating ? handleCancelGenerate : handleGenerate}
-                      disabled={(!isGenerating && areSlidersLocked) || !selectedItemId || (!currentSourceItem?.parameters?.analyzedOpticalParams && currentSourceItem?.type !== 'generated')}
+                      disabled={(!isGenerating && areSlidersLocked) || selectedItemIds.length === 0 || (!canvasItems.find(i => i.id === selectedItemIds[0])?.parameters?.analyzedOpticalParams && canvasItems.find(i => i.id === selectedItemIds[0])?.type !== 'generated')}
                       className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                     >
                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
