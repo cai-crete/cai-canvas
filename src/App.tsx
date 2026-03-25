@@ -208,6 +208,7 @@ export default function App() {
   const clickedItemStartPositionsRef = useRef<Record<string, { x: number, y: number }>>({});
   const pendingToggleItemIdRef = useRef<string | null>(null);
   const isTwoFingerActiveRef = useRef(false); // V198: Block lasso on two-finger touch
+  const previousCanvasModeRef = useRef<'select' | 'pan'>('select'); // V199: Pan persistence
   // V157: AbortController for canceling generation
   const abortControllerRef = useRef<AbortController | null>(null);
   // Keep State for render (cursor CSS)
@@ -570,7 +571,8 @@ export default function App() {
       const dx = coords.x - dragStartRef.current.x;
       const dy = coords.y - dragStartRef.current.y;
 
-      if (pendingToggleItemIdRef.current && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+      const threshold = (e.pointerType === 'pen' || e.pointerType === 'stylus') ? 6 : 3;
+      if (pendingToggleItemIdRef.current && (Math.abs(dx) > threshold || Math.abs(dy) > threshold)) {
         pendingToggleItemIdRef.current = null;
       }
 
@@ -662,6 +664,7 @@ export default function App() {
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       isTwoFingerActiveRef.current = true; // V198: Block lasso
+      previousCanvasModeRef.current = canvasMode as 'select' | 'pan'; // V199: Save mode
       setCanvasMode('pan');
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -704,7 +707,7 @@ export default function App() {
     isTwoFingerActiveRef.current = false; // V198: Reset lasso block
     lastTouchDist.current = null;
     lastTouchCenter.current = null;
-    setCanvasMode('select');
+    setCanvasMode(previousCanvasModeRef.current); // V199: Restore previous mode
   };
 
   const toggleTheme = () => {
