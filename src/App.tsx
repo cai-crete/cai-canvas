@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, Footprints } from 'lucide-react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, Footprints, Plus, PanelLeft } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 
@@ -220,8 +220,9 @@ export default function App() {
   
   // UI State
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [activeTab, setActiveTab] = useState<'create' | 'result'>('create');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false); // V173
+  const [activeTab, setActiveTab] = useState<'control'|'result'>('control');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>(''); // V155: 단계 메시지
   const [sitePlanImage, setSitePlanImage] = useState<string | null>(null);
@@ -1366,7 +1367,7 @@ ${layerC_property}
         
         <section 
           ref={canvasRef as React.RefObject<HTMLElement>}
-          className={`flex-1 min-w-0 relative bg-[#fcfcfc] dark:bg-[#050505] overflow-hidden flex items-center justify-center transition-colors duration-300 select-none touch-none
+          className={`flex-1 min-w-0 relative bg-[#fcfcfc] dark:bg-[#050505] overflow-hidden flex items-center justify-center transition-colors duration-300 touch-none
             ${canvasMode === 'pan' 
               ? (isDraggingPan ? 'cursor-grabbing' : 'cursor-grab') 
               : (isDraggingItem ? 'cursor-move' : 'cursor-default')
@@ -1382,119 +1383,101 @@ ${layerC_property}
           onTouchEnd={handleTouchEnd}
         >
 
-          <div 
-            className={`
-              absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2
-              bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 pointer-events-auto
-              transition-all duration-300 rounded-full py-2.5 w-11 backdrop-blur-sm
-            `}
-            style={{
-              boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
-            }}
-          >
-            {/* 1. 도구 모드 (Select / Pan) */}
-            <button 
-              onClick={() => setCanvasMode('select')}
-              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'select' ? 'w-8 h-8 bg-black text-white dark:bg-white dark:text-black' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
-              title="Select Mode"
-            >
-              <MousePointer2 size={18} />
-            </button>
-            <button 
-              onClick={() => {
-                setCanvasMode('pan');
+          {/* V173/V174: Integrated Left Tool Bar Area */}
+          <div className="absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center pointer-events-none">
+            {/* Main Control Bar */}
+            <div 
+              className={`
+                flex flex-col items-center gap-2
+                bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 pointer-events-auto
+                transition-all duration-300 rounded-full py-2 w-11 backdrop-blur-sm
+              `}
+              style={{
+                boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
               }}
-              className={`aspect-square flex items-center justify-center rounded-full transition-all ${canvasMode === 'pan' ? 'w-8 h-8 bg-black text-white dark:bg-white dark:text-black' : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'}`}
-              title="Pan Mode"
             >
-              <Hand size={18} />
-            </button>
+              {/* 1. 도구 모드 (Toggle: Select / Pan) */}
+              <button 
+                onClick={() => setCanvasMode(canvasMode === 'select' ? 'pan' : 'select')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all bg-black text-white dark:bg-white dark:text-black`}
+                title={canvasMode === 'select' ? 'Switch to Pan Mode' : 'Switch to Select Mode'}
+              >
+                {canvasMode === 'select' ? <MousePointer2 size={18} /> : <Hand size={18} />}
+              </button>
 
-            {/* V75/V113: Undo & Redo Buttons */}
-            <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
-            <button 
-              onClick={handleUndo}
-              disabled={historyStates.length === 0}
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${historyStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-              title="Undo"
-            >
-              <Undo size={18} />
-            </button>
-            <button 
-              onClick={handleRedo}
-              disabled={redoStates.length === 0}
-              className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${redoStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-              title="Redo"
-            >
-              <Redo size={18} />
-            </button>
-          </div>
+              <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
 
-          {/* V71: Dynamic Horizontal Control Bar (Upload + Zoom + Compass) */}
-          <div 
-            className={`
-              absolute bottom-[12px] z-30 flex items-center
-              bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 pointer-events-auto
-              transition-all duration-500 ease-in-out rounded-full overflow-hidden h-11 backdrop-blur-sm
-            `}
-            style={{
-              left: isRightPanelOpen ? '50%' : 'calc(100% - 12px)',
-              transform: isRightPanelOpen ? 'translateX(-50%)' : 'translateX(-100%)',
-              whiteSpace: 'nowrap',
-              paddingLeft: '6px',
-              paddingRight: '6px',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
-            }}
-          >
-            {/* 1. 이미지 업로드 버튼 */}
-            <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
-            <div className="flex px-1 min-h-[44px] items-center">
+              {/* 2. Undo & Redo Buttons */}
+              <button 
+                onClick={handleUndo}
+                disabled={historyStates.length === 0}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${historyStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Undo"
+              >
+                <Undo size={18} />
+              </button>
+              <button 
+                onClick={handleRedo}
+                disabled={redoStates.length === 0}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${redoStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Redo"
+              >
+                <Redo size={18} />
+              </button>
+
+              <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
+
+              {/* 3. Search (Expandable Zoom Interface) */}
+              <div className="relative">
+                <button 
+                  onClick={() => setIsSearchExpanded(!isSearchExpanded)} 
+                  className={`w-9 h-9 flex items-center justify-center rounded-full transition-all ${isSearchExpanded ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                  title="Zoom Controls"
+                >
+                  <Search size={18} />
+                </button>
+
+                {/* Horizontal Expanded Bar */}
+                {isSearchExpanded && (
+                  <div 
+                    className="absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 flex items-center bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 rounded-full h-11 px-2 backdrop-blur-sm"
+                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
+                  >
+                    {/* Fit Screen (Corners only icon) */}
+                    <button 
+                      onClick={handleFocus} 
+                      className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
+                      title="Fit to Screen"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15 3h6v6M9 21H3v-6M21 15v6h-6M3 9V3h6" />
+                      </svg>
+                    </button>
+
+                    <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10 mx-1" />
+
+                    {/* Zoom Level */}
+                    <div className="flex items-center">
+                      <button onClick={() => zoomStep(-1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">−</button>
+                      <div className="min-w-[50px] text-center font-mono text-xs font-bold">{Math.round(canvasZoom)}%</div>
+                      <button onClick={() => zoomStep(1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors">+</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* V174: Relocated Independent Upload Button (Desired 18px gap between circles) */}
+            {/* Toolbar has py-2 (8px), so mt-[10px] makes total 18px gap */}
+            <div className="mt-[10px] flex flex-col items-center">
               <button 
                 onClick={() => fileInputRef.current?.click()} 
-                className="w-9 h-9 aspect-square flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-black text-white hover:bg-neutral-800 transition-colors shadow-lg pointer-events-auto"
                 title="Upload Image"
               >
-                <Upload size={18} />
+                <Plus size={22} />
               </button>
-            </div>
-
-            <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10" />
-
-            {/* 2. 돋보기 / 초기화 */}
-            <div className="flex px-1 min-h-[44px] items-center">
-              <button 
-                onClick={handleFocus} 
-                className="w-9 h-9 aspect-square flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors" 
-                title="Fit to 100% / Focus Target"
-              >
-                <Search size={18} />
-              </button>
-            </div>
-
-            <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10" />
-
-            {/* 3. 줌 컨트롤 */}
-            <div className="flex px-1 select-none items-center min-h-[44px]">
-              <button onClick={() => zoomStep(-1)} className="w-9 h-9 aspect-square flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="Zoom Out">−</button>
-              <div className="min-w-[60px] h-full flex items-center justify-center font-mono text-sm px-1 font-bold">{Math.round(canvasZoom)}%</div>
-              <button onClick={() => zoomStep(1)} className="w-9 h-9 aspect-square flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors" title="Zoom In">+</button>
-            </div>
-
-            <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10" />
-
-            {/* 4. 나침반 (패널 토글) */}
-            <div className="flex px-1">
-              <button 
-                onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-                className={`aspect-square flex items-center justify-center rounded-full transition-all ${
-                  isRightPanelOpen 
-                    ? 'w-8 h-8 bg-black text-white dark:bg-white dark:text-black' 
-                    : 'w-9 h-9 hover:bg-black/5 dark:hover:bg-white/5'
-                }`}
-                title="Toggle Panel"
-              >
-                <Compass size={18} />
-              </button>
+              <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
           </div>
 
@@ -1549,9 +1532,9 @@ ${layerC_property}
                   draggable={false}
                 />
                 
-                {/* V136: Hide labels if zoom is 20% or less */}
+                {/* V136: Hide labels if zoom is 30% or less (V173 adjusted) */}
                 {(() => {
-                  if (canvasZoom <= 20) return null;
+                  if (canvasZoom <= 30) return null;
                   const labelText = item.type === 'upload'
                     ? 'ORIGINAL'
                     : (() => {
@@ -1771,55 +1754,55 @@ ${layerC_property}
           {/* Loading Overlay Deleted in V82 */}
         </section>
 
-        {/* RIGHT SIDEBAR WRAPPER (V55: More compact, absolute fixed center) */}
+        {/* RIGHT SIDEBAR WRAPPER (V177: Detached Header & Minimal Footer) */}
         <div className="absolute top-0 right-0 h-full z-50 pointer-events-none flex justify-end p-[12px]">
           <div className={`
-            relative h-full transition-all duration-500 ease-in-out flex items-center
+            relative h-full transition-all duration-500 ease-in-out flex flex-col items-end
             ${isRightPanelOpen ? 'w-[284px]' : 'w-0'}
           `}>
-            {/* FLOATING PANEL - V59: Target Transparency (10% / 90% opacity) */}
-            <div className={`w-full h-full transition-all duration-500 ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}`}>
-              <aside 
-                className="h-full w-[284px] rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10"
+          
+            {/* V177 Detached Header Row (CHANGE VIEWPOINT + PanelLeft) */}
+            <div className={`
+              w-[284px] shrink-0 h-[44px] flex items-center gap-[12px] mb-[12px] transition-all duration-500
+              ${isRightPanelOpen ? 'translate-x-0' : 'translate-x-0'}
+            `}>
+              <button 
+                onClick={() => {
+                  const currentIndex = canvasItems.findIndex(i => i.id === selectedItemId);
+                  const nextIndex = (currentIndex + 1) % canvasItems.length;
+                  if (canvasItems[nextIndex]) setSelectedItemId(canvasItems[nextIndex].id);
+                }}
+                className={`
+                  flex-1 h-full rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center justify-center backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto
+                  ${isRightPanelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+                `}
               >
-                {/* Sidebar Content Wrapper */}
-                <div className={`flex flex-col h-full transition-opacity duration-200 ${isRightPanelOpen ? 'opacity-100 delay-150' : 'opacity-0'}`}>
-                
-                  {/* Top Navigation - V124: < CHANGE VIEWPOINT > */}
-                  <div className="pt-4 pb-2 px-4 shrink-0">
-                    <div className="flex items-center justify-between gap-1.5">
-                      <button 
-                        onClick={() => {
-                          const currentIndex = canvasItems.findIndex(i => i.id === selectedItemId);
-                          if (currentIndex > 0) setSelectedItemId(canvasItems[currentIndex - 1].id);
-                        }} 
-                        disabled={!selectedItemId || canvasItems.findIndex(i => i.id === selectedItemId) <= 0}
-                        className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 transition-colors disabled:opacity-20 flex-shrink-0"
-                      >
-                        <ChevronLeft size={16} />
-                      </button>
-                      
-                      <div className="flex-1 h-9 rounded-full bg-white/50 dark:bg-black/50 border border-black/10 dark:border-white/10 flex items-center justify-center backdrop-blur-sm">
-                        <span className="font-display tracking-widest uppercase text-center font-medium text-[13px]">
-                          CHANGE VIEWPOINT
-                        </span>
-                      </div>
+                <span className="font-display tracking-widest uppercase font-medium text-[13px]">
+                  CHANGE VIEWPOINT
+                </span>
+              </button>
 
-                      <button 
-                         onClick={() => {
-                          const currentIndex = canvasItems.findIndex(i => i.id === selectedItemId);
-                          if (currentIndex !== -1 && currentIndex < canvasItems.length - 1) setSelectedItemId(canvasItems[currentIndex + 1].id);
-                        }} 
-                        disabled={!selectedItemId || canvasItems.findIndex(i => i.id === selectedItemId) >= canvasItems.length - 1}
-                        className="w-9 h-9 rounded-full flex items-center justify-center bg-transparent border border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/5 transition-colors disabled:opacity-20 flex-shrink-0"
-                      >
-                        <ChevronRight size={16} />
-                      </button>
-                    </div>
-                  </div>
+              <button 
+                onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+                className={`
+                  w-11 h-11 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center justify-center backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto
+                `}
+              >
+                {isRightPanelOpen ? <PanelLeft size={18} /> : <PanelLeft size={18} className="rotate-180" />}
+              </button>
+            </div>
 
-                  {/* V124 Master Box Container (Scrollable) */}
-                  <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0 flex flex-col gap-5 custom-scrollbar">
+            {/* V177 Main Sidebar Card (Separated by 12px) */}
+            <div className={`
+              flex-1 w-[284px] transition-all duration-500
+              ${isRightPanelOpen ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-10 pointer-events-none'}
+            `}>
+              <aside 
+                className="h-full w-full rounded-[20px] flex flex-col overflow-hidden pointer-events-auto bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10"
+              >
+                <div className="flex flex-col h-full">
+                  {/* Master Box Container (Scrollable) */}
+                  <div className="flex-1 overflow-y-auto px-4 pb-4 pt-4 min-h-0 flex flex-col gap-5 custom-scrollbar">
 
                     {/* V124 Site Plan Indicator (Replaced with new minimal version) */}
                     <div className="flex-shrink-0 w-full aspect-square mx-auto pointer-events-none rounded-[20px] bg-white/30 dark:bg-black/30 border border-black/5 dark:border-white/5">
@@ -1864,36 +1847,7 @@ ${layerC_property}
                       </div>
                     </div>
 
-                    {/* V133 ANALYSIS REPORT Area (Fixed width, break-words, internal scroll) */}
-                    <div className="font-mono text-xs leading-normal tracking-widest space-y-3 border border-black/10 dark:border-white/10 bg-white/30 dark:bg-black/30 p-4 rounded-[20px] flex-1 overflow-x-hidden overflow-y-auto break-words whitespace-pre-wrap">
-                      <span className="opacity-50 block font-display uppercase tracking-widest text-xs mb-3">ANALYSIS REPORT</span>
-                      {elevationParams && typeof elevationParams === 'object' ? (
-                        <div className="space-y-4">
-                          {Object.entries(elevationParams).map(([groupKey, groupVal]: [string, any]) => {
-                            if (typeof groupVal !== 'object' || groupVal === null) return null;
-                            return (
-                              <div key={groupKey} className="text-[10px]">
-                                <span className="opacity-50 block uppercase mb-1.5">{groupKey.replace(/^[0-9]+_/, '').replace(/_/g, ' ')}</span>
-                                <div className="pl-3 border-l-2 border-black/10 dark:border-white/10 space-y-1.5">
-                                  {Object.entries(groupVal).map(([key, val]) => (
-                                    <div key={key} className="flex justify-between items-start gap-2">
-                                      <span className="opacity-60 capitalize whitespace-nowrap">{key.replace(/_/g, ' ')}</span>
-                                      <span className="text-right flex-1 break-words">
-                                        {typeof val === 'object' && val !== null 
-                                          ? JSON.stringify(val).replace(/["{}]/g, '').replace(/,/g, ', ') 
-                                          : String(val)}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <div className="opacity-30 text-center py-6">Pending...</div>
-                      )}
-                    </div>
+                    {/* V177 ANALYSIS REPORT Removed */}
                   </div>
 
                   {/* V124 GENERATE BUTTON (External to Scroll Box, Bottom Locked) */}
@@ -1909,13 +1863,10 @@ ${layerC_property}
                     </button>
                   </div>
 
-                  {/* BOTTOM FOOTER */}
+                  {/* BOTTOM FOOTER - V177: Copyright only, No version marker */}
                   <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
                     <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
                       © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
-                    </p>
-                    <p className="font-mono text-[9px] opacity-20 text-center uppercase tracking-widest">
-                      V172-R1 (RESTORED)
                     </p>
                   </div>
                 </div>
