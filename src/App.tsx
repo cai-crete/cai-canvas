@@ -564,12 +564,13 @@ export default function App() {
         y: e.clientY - dragStartRef.current.y
       });
     } else if (isDraggingItemRef.current && selectedItemIdsRef.current.length > 0) {
-      if (pendingToggleItemIdRef.current) {
-        pendingToggleItemIdRef.current = null;
-      }
       const currentIds = selectedItemIdsRef.current;
       const dx = coords.x - dragStartRef.current.x;
       const dy = coords.y - dragStartRef.current.y;
+
+      if (pendingToggleItemIdRef.current && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        pendingToggleItemIdRef.current = null;
+      }
 
       setCanvasItems(prev => prev.map(item => {
         if (!currentIds.includes(item.id)) return item;
@@ -658,6 +659,7 @@ export default function App() {
   // --- Tablet Touch Handlers ---
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
+      setCanvasMode('pan');
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
       const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
@@ -698,6 +700,7 @@ export default function App() {
   const handleTouchEnd = () => {
     lastTouchDist.current = null;
     lastTouchCenter.current = null;
+    setCanvasMode('select'); // Reset to select mode after two-finger gesture
   };
 
   const toggleTheme = () => {
@@ -749,8 +752,7 @@ export default function App() {
 
           setHistoryStates(prevH => [...prevH, canvasItems]);
           setCanvasItems(prev => [...prev, newItem]);
-          setSelectedItemIds([newItemId]);
-          setSitePlanImage(null);
+          setSelectedItemIds([]); // V195: Initial state deactivated
           setActiveTab('create');
           setIsAnalyzing(true);
           setAnalysisStep('배경 이미지 최적화 중...'); // V155: Step — Background Regen
@@ -1557,9 +1559,45 @@ ${layerC_property}
             className="absolute inset-0 transition-transform duration-75 ease"
             style={{ 
               transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom / 100})`,
-              transformOrigin: 'center'
+              transformOrigin: '0 0'
             }}
           >
+            {/* V195: Connection Lines (Background Layer) */}
+            <svg
+              className="absolute inset-0 pointer-events-none overflow-visible"
+              style={{ zIndex: 5, pointerEvents: 'none' }}
+            >
+              <defs>
+                <filter id="shadow">
+                  <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.1" />
+                </filter>
+              </defs>
+              {canvasItems.map((item) => {
+                if (!item.motherId) return null;
+                const mother = canvasItems.find(i => i.id === item.motherId);
+                if (!mother) return null;
+                
+                // V195.1: Mother Right-Center to Derived Left-Center
+                const x1 = `calc(50% + ${mother.x + mother.width}px)`;
+                const y1 = `calc(50% + ${mother.y + mother.height / 2}px)`;
+                const x2 = `calc(50% + ${item.x}px)`;
+                const y2 = `calc(50% + ${item.y + item.height / 2}px)`;
+
+                return (
+                  <line
+                    key={`line-${item.id}`}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="rgba(0, 0, 0, 0.8)"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                );
+              })}
+            </svg>
 
           {/* Transform Wrapper */}
           <div 
@@ -1660,11 +1698,12 @@ ${layerC_property}
                           const newItem: CanvasItem = {
                             ...item,
                             id: `${item.id}-copy-${Date.now()}`,
-                            x: item.x + 40,
-                            y: item.y + 40,
+                            x: item.x + item.width + 1,
+                            y: item.y,
+                            motherId: item.id // Maintain ancestry for connection lines
                           };
                           setCanvasItems(prev => [...prev, newItem]);
-                          setSelectedItemIds([newItem.id]);
+                          setSelectedItemIds([]); // V195: Initial state deactivated
                         }}
                         className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                         style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
