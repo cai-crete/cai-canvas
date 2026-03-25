@@ -542,11 +542,10 @@ export default function App() {
     }
 
     // 3. Background click -> Lasso
-    if (!openLibraryItemId) {
-      setSelectedItemIds([]);
-      selectedItemIdsRef.current = [];
-      setOpenLibraryItemId(null);
-    }
+    // 3. No Item Clicked -> Start Lasso + Close Artboard
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    setOpenLibraryItemId(null);
     
     setIsLassoing(true);
     isLassoingRef.current = true;
@@ -1726,7 +1725,7 @@ ${layerC_property}
                     {/* V75/V81/V160: Item-bound Library Artboard */}
                     {openLibraryItemId === item.id && (
                       <div 
-                        className={`absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 ${canvasMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'} cursor-default`}
+                        className="absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 pointer-events-auto cursor-default"
                         style={{
                           left: 'calc(100% + 12px)',
                           top: 0,
