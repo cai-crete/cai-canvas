@@ -363,6 +363,19 @@ export default function App() {
     }
   }, [theme]);
 
+  // V200-3: Non-passive wheel listener for web zoom
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = -e.deltaY * 0.1;
+      setCanvasZoom(prev => Math.min(Math.max(prev + zoomFactor, 10), 200));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
   // --- Handlers ---
   const ZOOM_STEPS_BUTTON = [10, 25, 50, 75, 100, 125, 150, 175, 200];
 
@@ -704,10 +717,11 @@ export default function App() {
   };
 
   const handleTouchEnd = () => {
-    isTwoFingerActiveRef.current = false; // V198: Reset lasso block
+    const wasTwo = isTwoFingerActiveRef.current; // V200-1: Read before reset
+    isTwoFingerActiveRef.current = false;
     lastTouchDist.current = null;
     lastTouchCenter.current = null;
-    setCanvasMode(previousCanvasModeRef.current); // V199: Restore previous mode
+    if (wasTwo) setCanvasMode(previousCanvasModeRef.current); // V200-1: Restore only after two-finger gesture
   };
 
   const toggleTheme = () => {
@@ -1572,7 +1586,7 @@ ${layerC_property}
             {/* V195/V198: Connection Lines (Background Layer - fixed SVG coordinates) */}
             <svg
               className="absolute pointer-events-none overflow-visible"
-              style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, zIndex: 5, pointerEvents: 'none', overflow: 'visible' }}
+              style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, zIndex: 30, pointerEvents: 'none', overflow: 'visible' }}
             >
               {canvasItems.map((item) => {
                 if (!item.motherId) return null;
@@ -1592,7 +1606,7 @@ ${layerC_property}
                     y1={y1}
                     x2={x2}
                     y2={y2}
-                    stroke="rgba(0, 0, 0, 0.8)"
+                    stroke="rgba(0, 0, 0, 0.6)"
                     strokeWidth="1"
                     vectorEffect="non-scaling-stroke"
                     style={{ pointerEvents: 'none' }}
