@@ -934,40 +934,53 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
       const analysisPrompt = `
-        [Protocol A: Architectural Logic Engine & Deterministic BIM Compiler v2.2]
-        
-        TASK: Perform a high-precision architectural diagnosis and extract BIM parameters (AEPL Schema).
-        ACT AS: A Deterministic BIM Compiler (Hallucination Disabled).
-        
+        Analyze this architectural image.
         [CRITICAL PRINCIPLE - CLOCK-FACE COORDINATE SYSTEM]
-        1. Identify the Primary_Facade first (Anchored at 06:00).
-        2. Define virtual camera coordinates based on this strictly mapped clock-face:
-           - 06:00 = Front (Primary_Facade)
-           - 03:00 = Right
-           - 09:00 = Left
-           - 12:00 = Rear
-        3. Define the current photo's relative angle: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30.
+        1. Identify the architectural Main Facade first.
+        2. Imagine looking down at a clock face drawn on the ground, with the building at the center. 
+        3. Define the virtual camera's coordinates based on this strictly mapped clock-face:
+           - 06:00 = Camera looking STRAIGHT AT the Main Facade (Primary_Facade).
+           - 03:00 = Camera looking at the Right Side (Right_Facade).
+           - 09:00 = Camera looking at the Left Side (Left_Facade).
+           - 12:00 = Camera looking at the Rear/Back (Rear_Facade).
+        4. Output the estimated angle (Where the camera is currently standing taking this photo) from the discrete options: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30.
         
-        [AEPL MASTER SCHEMA - ENSEMBLE PAIR (v4)]
-        Structure your analysis into the following 1:1 matching pairs:
-        
-        1_Geometry_Data_MASTER (Shape Anchor):
-        - mass_typology, proportion_ratio (X:Y:Z), floor_count, roof_form (Flat/Pitched/Gable/etc), core_typology, base_type.
-        - Define structural grid Module (X & Z) and Bounding Box volume.
-        
-        2_Property_Data_SLAVE (Data Binder):
-        - base_material_type (PBR Specs), base_color_hex, fenestration_type, window_to_wall_ratio (0.0~1.0).
-        - Optical metadata: IOR, Transparency, Aging level.
-        
-        Return in JSON format:
+        Return estimated parameters in JSON format:
         {
-          "angle": "One of: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30",
+          "angle": "One of: 12:00, 1:30, 3:00, 04:30, 06:00 (Straight Front), 07:30, 09:00, 10:30",
           "altitude_index": "0 to 7 (index of ALTITUDES constant)",
           "lens_index": "0 to 7 (index of LENSES constant)",
           "time_index": "0 to 7 (index of TIMES constant)",
+          "site_plan_hint": "Description of building footprint",
           "elevation_parameters": {
-            "1_Geometry_MASTER": { ... },
-            "2_Property_SLAVE": { ... }
+            "1_macro_geometry": {
+              "mass_typology": "Enum: Single_Block / L_Shape / U_Shape / Stepped / Cantilevered",
+              "proportion_ratio": "String X:Y:Z",
+              "floor_count": "Integer",
+              "roof_form": "Enum: Flat / Pitched / Gable / Hip",
+              "core_typology": "Enum: Center_Core / Side_Core / Rear_Core / Split_Core",
+              "base_type": "Enum: Solid_Plinth / Piloti / Sunken"
+            },
+            "2_site_constraints": {
+              "context_type": "Enum: Type_A_Urban_Dense / Type_B_Open_Detached",
+              "blind_wall": "Boolean for Left/Right/Rear"
+            },
+            "3_material": {
+              "base_material_type": "Enum: Exposed_Concrete / Brick_Masonry / Metal_Panel / Glass_CurtainWall / etc",
+              "base_color_hex": "String hex code"
+            },
+            "4_fenestration": {
+              "fenestration_type": "Enum: Punched_Window / Ribbon_Window / Curtain_Wall / Storefront",
+              "window_to_wall_ratio": "Float 0.0~1.0"
+            },
+            "5_articulation": {
+              "has_balcony": true/false,
+              "has_vertical_fins": true/false
+            },
+            "6_mep_assets": {
+              "spawn_hvac_unit": true/false
+            }
+          }
           }
         }
       `;
@@ -997,19 +1010,23 @@ export default function App() {
         if (data.lens_index !== undefined) setLensIndex(Number(data.lens_index));
         if (data.time_index !== undefined) setTimeIndex(Number(data.time_index));
 
-        // --- V2.2: ENSEMBLE PAIR VALIDATION GATE ---
+        // --- V152: PROTOCOL FAIL VERIFICATION (루프 브레이커) ---
+        // 단방향 추론 (One-Way Inference) 원칙: 추출 정보가 불완전하면 즉결 처분(FAIL)하고 중단함 (좀비 객체 방지).
         const hasElevParams = data.elevation_parameters &&
-          data.elevation_parameters['1_Geometry_MASTER'] &&
-          data.elevation_parameters['2_Property_SLAVE'];
+          data.elevation_parameters['1_macro_geometry'] &&
+          data.elevation_parameters['2_site_constraints'] &&
+          data.elevation_parameters['3_material'] &&
+          data.elevation_parameters['4_fenestration'] &&
+          data.elevation_parameters['5_articulation'];
 
         if (!hasElevParams) {
-          console.error('[PROTOCOL-FAIL] Phase 2 검증 실패: AEPL 필수 객체(ENSEMBLE PAIR) 누락');
+          console.error('[PROTOCOL-FAIL] Phase 2 검증 실패: 필수 건축 파라미터(AEPL) 스키마가 누락되었거나 환각 텍스트가 반환되었습니다.');
           setCanvasItems(prev => prev.filter(item => item.id !== itemId));
           setIsAnalyzing(false);
           setIsGenerating(false);
           return false;
         }
-        console.log('[PROTOCOL-PASS] Phase 2 검증 통과: BIM 앙상블 페어 동결 완료');
+        console.log('[PROTOCOL-PASS] Phase 2 검증 통과: 파라미터 완전성 확인');
         // --------------------------------------------------------
 
         const analyzedOpt = {
@@ -1063,39 +1080,38 @@ export default function App() {
   const generateElevations = async (base64Image: string, extractedParams?: any, itemId?: string) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "BIM Lock-on Active";
+      const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
 
-      setAnalysisStep('기하학 절대 객체 락온 중...');
+      setAnalysisStep('입면 데이터 생성 중...');
 
       const base64Data = base64Image.split(',')[1];
       const mimeType = base64Image.split(';')[0].split(':')[1];
 
-      // V2.2: New Sequence (Front -> Top -> Right -> Left -> Rear)
       const viewConfigs = [
-        { key: 'front', label: 'FRONT', angle: '06:00', az: 0, alt: 0, normal: '0, -1, 0' },
-        { key: 'top', label: 'TOP', angle: 'TOP_VIEW', az: 0, alt: 90, normal: '0, 0, 1' },
-        { key: 'right', label: 'RIGHT', angle: '03:00', az: 90, alt: 0, normal: '1, 0, 0' },
-        { key: 'left', label: 'LEFT', angle: '09:00', az: 270, alt: 0, normal: '-1, 0, 0' },
-        { key: 'rear', label: 'REAR', angle: '12:00', az: 180, alt: 0, normal: '0, 1, 0' }
+        { key: 'front', label: 'FRONT', angle: '06:00' },
+        { key: 'right', label: 'RIGHT', angle: '03:00' },
+        { key: 'rear', label: 'REAR', angle: '12:00' },
+        { key: 'left', label: 'LEFT', angle: '09:00' },
+        { key: 'top', label: 'TOP', angle: 'TOP_VIEW' }
       ];
 
       const generateOne = async (config: typeof viewConfigs[0]) => {
         const prompt = `
-          [Protocol B: Visualization Execution Engine v2.2]
+          [Architectural Elevation Generation Protocol - System Protocol V180]
+          TASK: Generate a single ${config.label} orthographic view of the building.
           
-          TASK: Deterministic Rendering of the building's ${config.label} Orthographic View.
-          CONTEXT: [ensemble_pair AEPS-v4] ${contextualParamsStr}
+          [CONTEXT]
+          - Source Image: Use the uploaded photo for material/texture truth.
+          - Architectural Parameters: ${contextualParamsStr}
           
-          [PHASE 1: GEOMETRY MASTER LOCKING]
-          - View: ${config.label} (Angle: ${config.angle}, Axis: ${config.normal})
-          - Camera: Azimuth ${config.az}, Altitude ${config.alt}, Orthographic Projection (FOV=0).
-          - Snap-to: 100% Geometry guide from Source Image.
+          [SPECIFICATION]
+          - View: ${config.label === 'TOP' ? 'Top-down Roof Plan' : `Elevation from ${config.angle} (o'clock)`}
+          - Projection: True Orthographic (FOV=0), zero perspective.
+          - Style: Realistic architectural rendering, matching the source texture.
+          - Background: Pure Transparent Background (Optical Null Space).
+          - Orientation: ${config.label === 'TOP' ? 'Align Front (06:00) to Bottom of frame' : 'Straight on elevation'}
           
-          [PHASE 2: PROPERTY SLAVE INJECTION]
-          - Texture Override: Cast Albedo/PBR/IOR/Aging from Source to all surfaces.
-          - Global Illumination: Fixed GI Matrix for consistent shadows across 5 views.
-          
-          CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
+          CONSTRAINTS: NO text, NO labels, No perspective distortion.
         `.trim();
 
         const result = await ai.models.generateContent({
@@ -1123,10 +1139,10 @@ export default function App() {
 
       const newImages = {
         front: results[0],
-        top: results[1],
-        right: results[2],
+        right: results[1],
+        rear: results[2],
         left: results[3],
-        rear: results[4]
+        top: results[4]
       } as const;
 
       setElevationImages(newImages);
@@ -1903,130 +1919,104 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         </button>
                       </div>
 
-                      {/* V180/V2.2: Item-bound Library Artboard (Architecture Sheet) */}
+                      {/* V75/V81/V160: Item-bound Library Artboard */}
                       {openLibraryItemId === item.id && (
                         <div
-                          className="absolute flex flex-col bg-[#121212] text-white shadow-2xl rounded-2xl p-0 pointer-events-auto cursor-default overflow-hidden border border-white/10"
+                          className="absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 pointer-events-auto cursor-default"
                           style={{
                             left: 'calc(100% + 12px)',
                             top: 0,
-                            width: '850px',
-                            height: '650px',
-                            fontFamily: "'Pretendard', sans-serif"
+                            width: '800px',
+                            height: '600px',
+                            border: 'none',
                           }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
-                          {/* Header & Tabs */}
-                          <div className="flex justify-between items-center px-6 py-4 shrink-0 bg-black/40 border-b border-white/5">
-                            <h2 className="font-display text-2xl tracking-widest text-[#F4C430]">
-                              {artboardPage === 1 && "01_ANALYSIS REPORT"}
-                              {artboardPage === 2 && "02_FRONT VIEW (06:00)"}
-                              {artboardPage === 3 && "03_TOP VIEW (PLAN)"}
-                              {artboardPage === 4 && "04_RIGHT VIEW (03:00)"}
-                              {artboardPage === 5 && "05_LEFT VIEW (09:00)"}
-                              {artboardPage === 6 && "06_REAR VIEW (12:00)"}
-                            </h2>
-                            <div className="flex gap-1.5">
+                          {/* V180: Header & Tabs */}
+                          <div className="flex justify-between items-center mb-4 shrink-0">
+                            <span className="font-mono text-xs tracking-widest uppercase font-bold text-black/70 dark:text-white/70">
+                              {artboardPage === 1 && "1. ANALYSIS REPORT"}
+                              {artboardPage === 2 && "2. FRONT VIEW (06:00)"}
+                              {artboardPage === 3 && "3. RIGHT VIEW (03:00)"}
+                              {artboardPage === 4 && "4. REAR VIEW (12:00)"}
+                              {artboardPage === 5 && "5. LEFT VIEW (09:00)"}
+                              {artboardPage === 6 && "6. TOP VIEW"}
+                            </span>
+                            <div className="flex gap-2">
                               {[1, 2, 3, 4, 5, 6].map((p) => (
                                 <button
                                   key={p}
                                   onClick={() => setArtboardPage(p)}
-                                  className={`w-9 h-9 flex items-center justify-center rounded-lg text-sm font-mono transition-all
-                                    ${artboardPage === p 
-                                      ? 'bg-[#F4C430] text-black font-bold scale-110' 
-                                      : 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white'}`}
+                                  className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-mono transition-colors ${artboardPage === p ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
                                 >
-                                  {String(p).padStart(2, '0')}
+                                  {p}
                                 </button>
                               ))}
-                              <button onClick={() => setOpenLibraryItemId(null)} className="ml-2 w-9 h-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-red-500/20 text-white/40 hover:text-red-500 transition-colors">
-                                <X size={18} />
-                              </button>
                             </div>
                           </div>
 
-                          {/* Content Area */}
-                          <div className="flex-1 w-full overflow-hidden bg-black/20 flex flex-col">
+                          {/* V180: Content */}
+                          <div className="flex-1 w-full border border-black/10 dark:border-white/10 rounded-xl overflow-hidden bg-black/5 flex">
                             {artboardPage === 1 ? (
-                              /* Page 1: Analysis Report (BIM AEPL Schema) */
-                              <div className="flex w-full h-full p-6 gap-6">
+                              /* Page 1: Extracted Details (Analysis Report) */
+                              <div className="flex w-full h-full">
                                 {/* Left: Source Image */}
-                                <div className="w-[40%] h-full flex flex-col">
-                                  <span className="font-display text-sm uppercase text-[#F4C430] mb-3 tracking-[0.2em] block">SOURCE DIAGNOSIS</span>
-                                  <div className="flex-1 w-full bg-white/5 rounded-2xl border border-white/5 p-4 flex items-center justify-center overflow-hidden">
-                                    <img src={item.src} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" alt="Source" />
+                                <div className="w-[45%] h-full p-4 border-r border-black/10 dark:border-white/10 flex flex-col">
+                                  <span className="font-mono text-[10px] uppercase opacity-50 mb-3 tracking-widest block text-center">Source Image</span>
+                                  <div className="flex-1 w-full relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-lg border border-black/5 dark:border-white/5 p-2 overflow-hidden">
+                                    <img src={item.src} className="max-w-full max-h-full object-contain rounded drop-shadow-md" alt="Source" />
                                   </div>
                                 </div>
 
-                                {/* Right: AEPL Parameters */}
-                                <div className="w-[60%] h-full flex flex-col">
-                                  <span className="font-display text-sm uppercase text-[#F4C430] mb-3 tracking-[0.2em] block">BIM AEPL PARAMETERS (V4)</span>
-                                  <div className="flex-1 bg-white/5 rounded-2xl border border-white/5 p-6 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed">
-                                    {item.parameters?.elevationParams ? (
-                                      <div className="space-y-6">
-                                        <section>
-                                          <h4 className="text-[#F4C430] border-b border-white/10 pb-1 mb-2 font-bold uppercase tracking-wider">1_Geometry_MASTER</h4>
-                                          <pre className="text-white/60 bg-black/30 p-4 rounded-xl">
-                                            {JSON.stringify(item.parameters.elevationParams['1_Geometry_MASTER'] || item.parameters.elevationParams['1_macro_geometry'], null, 2)}
-                                          </pre>
-                                        </section>
-                                        <section>
-                                          <h4 className="text-[#F4C430] border-b border-white/10 pb-1 mb-2 font-bold uppercase tracking-wider">2_Property_SLAVE</h4>
-                                          <pre className="text-white/60 bg-black/30 p-4 rounded-xl">
-                                            {JSON.stringify(item.parameters.elevationParams['2_Property_SLAVE'] || item.parameters.elevationParams['3_material'], null, 2)}
-                                          </pre>
-                                        </section>
-                                      </div>
-                                    ) : (
-                                      <div className="h-full flex flex-col items-center justify-center opacity-30 italic">
-                                        <Loader2 className="animate-spin mb-2" />
-                                        <span>Waiting for Deterministic BIM Compilation...</span>
-                                      </div>
-                                    )}
-                                  </div>
+                                {/* Right: Extracted Text Parameters */}
+                                <div className="w-[55%] h-full p-6 overflow-y-auto font-mono text-[11px] leading-relaxed custom-scrollbar">
+                                  <span className="font-mono text-[10px] uppercase opacity-50 block mb-4 tracking-widest">Extracted Parameters</span>
+
+                                  {item.parameters?.analyzedOpticalParams && (
+                                    <div className="mb-6">
+                                      <h4 className="font-bold mb-2 text-blue-600 dark:text-blue-400 border-b border-black/10 dark:border-white/10 pb-1">Optical Parameters</h4>
+                                      <pre className="whitespace-pre-wrap text-[10px] bg-white/50 dark:bg-black/50 p-3 rounded-lg border border-black/5 dark:border-white/5">
+                                        {JSON.stringify(item.parameters.analyzedOpticalParams, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {item.parameters?.elevationParams ? (
+                                    <div>
+                                      <h4 className="font-bold mb-2 text-teal-600 dark:text-teal-400 border-b border-black/10 dark:border-white/10 pb-1">Architectural Parameters (AEPL)</h4>
+                                      <pre className="whitespace-pre-wrap text-[10px] bg-white/50 dark:bg-black/50 p-3 rounded-lg border border-black/5 dark:border-white/5">
+                                        {JSON.stringify(item.parameters.elevationParams, null, 2)}
+                                      </pre>
+                                    </div>
+                                  ) : (
+                                    <div className="mt-4 p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-center">
+                                      No AEPL Parameters Found
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
-                              /* Pages 2-6: Elevation Sheets (Template-Layout) */
-                              <div className="relative w-full h-full bg-[#121212] flex items-center justify-center p-8">
+                              /* Pages 2-5: Elevation Views */
+                              <div className="relative w-full h-full flex items-center justify-center p-4">
                                 {(() => {
-                                  const views = [
-                                    { key: 'front', label: 'FRONT= 정면= 06:00' },
-                                    { key: 'top', label: 'TOP= 평면/탑' },
-                                    { key: 'right', label: 'RIGHT= 우측면= 03:00' },
-                                    { key: 'left', label: 'LEFT= 좌측면= 09:00' },
-                                    { key: 'rear', label: 'REAR= 배면= 12:00' },
-                                  ];
-                                  const currentView = views[artboardPage - 2];
-                                  const imgSrc = elevationImages[currentView.key as keyof typeof elevationImages];
+                                  const views = item.parameters?.elevationImages;
+                                  let displayImg = null;
+                                  if (artboardPage === 2) displayImg = views?.front;
+                                  if (artboardPage === 3) displayImg = views?.right;
+                                  if (artboardPage === 4) displayImg = views?.rear;
+                                  if (artboardPage === 5) displayImg = views?.left;
+                                  if (artboardPage === 6) displayImg = views?.top;
 
-                                  return (
-                                    <div className="w-full h-full relative flex flex-col pt-12">
-                                      {/* Title Overlay */}
-                                      <h1 className="absolute top-0 left-0 font-display text-4xl text-white tracking-[2px] leading-none uppercase">
-                                        IMAGE TO ELEVATION: {currentView.label}
-                                      </h1>
-                                      
-                                      {/* Image Wrapper */}
-                                      <div className="flex-1 w-full bg-white/5 rounded-t-2xl border-x border-t border-white/5 flex items-center justify-center relative overflow-hidden">
-                                        {imgSrc ? (
-                                          <img src={imgSrc} className="max-w-full max-h-full object-contain" alt={currentView.label} />
-                                        ) : (
-                                          <div className="flex flex-col items-center gap-3 opacity-20">
-                                            <Loader2 className="animate-spin" size={40} />
-                                            <span className="font-display tracking-[0.2em]">GENERATING VIEW...</span>
-                                          </div>
-                                        )}
+                                  if (displayImg) {
+                                    return <img src={displayImg} className="max-w-full max-h-full object-contain mix-blend-multiply dark:mix-blend-screen" alt={`Page ${artboardPage}`} />;
+                                  } else {
+                                    return (
+                                      <div className="flex flex-col items-center gap-4">
+                                        <Loader2 size={32} className="animate-spin text-black/20 dark:text-white/20" />
+                                        <p className="font-mono opacity-40 uppercase tracking-widest text-[12px]">Generating Elevation Data...</p>
                                       </div>
-
-                                      {/* Label Item (Yellow Bar) */}
-                                      <div className="h-14 bg-[#F4C430] flex items-center justify-center rounded-b-2xl shadow-lg shrink-0">
-                                        <strong className="text-black font-medium text-lg tracking-[2px] uppercase">
-                                          {currentView.label}
-                                        </strong>
-                                      </div>
-                                    </div>
-                                  );
+                                    );
+                                  }
                                 })()}
                               </div>
                             )}

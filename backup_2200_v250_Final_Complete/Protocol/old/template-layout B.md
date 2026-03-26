@@ -115,50 +115,50 @@
 
   <div class="layout-container">
     <div class="main-panel">
-      <h1 class="title-overlay">IMAGE TO ELEVATION: FRONT= 정면= 06:00</h1>
+      <h1 class="title-overlay">IMAGE TO ELEVATION: FRONT</h1>
       <div class="composite-wrapper">
         <img src="{{img_url_front}}" class="master-composite-img" alt="Front View">
-        <div class="label-item"><strong>FRONT= 정면= 06:00</strong></div>
+        <div class="label-item"><strong>FRONT</strong></div>
       </div>
     </div>
   </div>
 
   <div class="layout-container">
     <div class="main-panel">
-      <h1 class="title-overlay">IMAGE TO ELEVATION: TOP= 평면/탑</h1>
-      <div class="composite-wrapper">
-        <img src="{{img_url_top}}" class="master-composite-img" alt="Top View">
-        <div class="label-item"><strong>TOP= 평면/탑</strong></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="layout-container">
-    <div class="main-panel">
-      <h1 class="title-overlay">IMAGE TO ELEVATION: RIGHT= 우측면= 03:00</h1>
+      <h1 class="title-overlay">IMAGE TO ELEVATION: RIGHT</h1>
       <div class="composite-wrapper">
         <img src="{{img_url_right}}" class="master-composite-img" alt="Right View">
-        <div class="label-item"><strong>RIGHT= 우측면= 03:00</strong></div>
+        <div class="label-item"><strong>RIGHT</strong></div>
       </div>
     </div>
   </div>
 
   <div class="layout-container">
     <div class="main-panel">
-      <h1 class="title-overlay">IMAGE TO ELEVATION: LEFT= 좌측면= 09:00</h1>
-      <div class="composite-wrapper">
-        <img src="{{img_url_left}}" class="master-composite-img" alt="Left View">
-        <div class="label-item"><strong>LEFT= 좌측면= 09:00</strong></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="layout-container">
-    <div class="main-panel">
-      <h1 class="title-overlay">IMAGE TO ELEVATION: REAR= 배면= 12:00</h1>
+      <h1 class="title-overlay">IMAGE TO ELEVATION: REAR</h1>
       <div class="composite-wrapper">
         <img src="{{img_url_rear}}" class="master-composite-img" alt="Rear View">
-        <div class="label-item"><strong>REAR= 배면= 12:00</strong></div>
+        <div class="label-item"><strong>REAR</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout-container">
+    <div class="main-panel">
+      <h1 class="title-overlay">IMAGE TO ELEVATION: LEFT</h1>
+      <div class="composite-wrapper">
+        <img src="{{img_url_left}}" class="master-composite-img" alt="Left View">
+        <div class="label-item"><strong>LEFT</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout-container">
+    <div class="main-panel">
+      <h1 class="title-overlay">IMAGE TO ELEVATION: TOP</h1>
+      <div class="composite-wrapper">
+        <img src="{{img_url_top}}" class="master-composite-img" alt="Top View">
+        <div class="label-item"><strong>TOP</strong></div>
       </div>
     </div>
   </div>

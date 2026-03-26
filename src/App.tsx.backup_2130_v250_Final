@@ -344,15 +344,6 @@ export default function App() {
   const [plannerCode, setPlannerCode] = useState<string>("");
   const [plannerAgents, setPlannerAgents] = useState<number[]>([]);
 
-  // V217: PRINT Panel States
-  const [printPrompt, setPrintPrompt] = useState<string>("");
-  const [printTemplate, setPrintTemplate] = useState<string>("REPORT");
-  const [printPages, setPrintPages] = useState<number>(7);
-
-  // V250: Mother App Common States (Resolution & Aspect Ratio)
-  const [resolution, setResolution] = useState<string>('NORMAL QUALITY');
-  const [aspectRatio, setAspectRatio] = useState<string>('4:3');
-
   // V75: Item-bound Library State
   const [openLibraryItemId, setOpenLibraryItemId] = useState<string | null>(null);
   const [artboardPage, setArtboardPage] = useState<number>(1); // V180: Artboard pagination 1-5
@@ -934,40 +925,53 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
       const analysisPrompt = `
-        [Protocol A: Architectural Logic Engine & Deterministic BIM Compiler v2.2]
-        
-        TASK: Perform a high-precision architectural diagnosis and extract BIM parameters (AEPL Schema).
-        ACT AS: A Deterministic BIM Compiler (Hallucination Disabled).
-        
+        Analyze this architectural image.
         [CRITICAL PRINCIPLE - CLOCK-FACE COORDINATE SYSTEM]
-        1. Identify the Primary_Facade first (Anchored at 06:00).
-        2. Define virtual camera coordinates based on this strictly mapped clock-face:
-           - 06:00 = Front (Primary_Facade)
-           - 03:00 = Right
-           - 09:00 = Left
-           - 12:00 = Rear
-        3. Define the current photo's relative angle: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30.
+        1. Identify the architectural Main Facade first.
+        2. Imagine looking down at a clock face drawn on the ground, with the building at the center. 
+        3. Define the virtual camera's coordinates based on this strictly mapped clock-face:
+           - 06:00 = Camera looking STRAIGHT AT the Main Facade (Primary_Facade).
+           - 03:00 = Camera looking at the Right Side (Right_Facade).
+           - 09:00 = Camera looking at the Left Side (Left_Facade).
+           - 12:00 = Camera looking at the Rear/Back (Rear_Facade).
+        4. Output the estimated angle (Where the camera is currently standing taking this photo) from the discrete options: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30.
         
-        [AEPL MASTER SCHEMA - ENSEMBLE PAIR (v4)]
-        Structure your analysis into the following 1:1 matching pairs:
-        
-        1_Geometry_Data_MASTER (Shape Anchor):
-        - mass_typology, proportion_ratio (X:Y:Z), floor_count, roof_form (Flat/Pitched/Gable/etc), core_typology, base_type.
-        - Define structural grid Module (X & Z) and Bounding Box volume.
-        
-        2_Property_Data_SLAVE (Data Binder):
-        - base_material_type (PBR Specs), base_color_hex, fenestration_type, window_to_wall_ratio (0.0~1.0).
-        - Optical metadata: IOR, Transparency, Aging level.
-        
-        Return in JSON format:
+        Return estimated parameters in JSON format:
         {
-          "angle": "One of: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30",
+          "angle": "One of: 12:00, 1:30, 3:00, 04:30, 06:00 (Straight Front), 07:30, 09:00, 10:30",
           "altitude_index": "0 to 7 (index of ALTITUDES constant)",
           "lens_index": "0 to 7 (index of LENSES constant)",
           "time_index": "0 to 7 (index of TIMES constant)",
+          "site_plan_hint": "Description of building footprint",
           "elevation_parameters": {
-            "1_Geometry_MASTER": { ... },
-            "2_Property_SLAVE": { ... }
+            "1_macro_geometry": {
+              "mass_typology": "Enum: Single_Block / L_Shape / U_Shape / Stepped / Cantilevered",
+              "proportion_ratio": "String X:Y:Z",
+              "floor_count": "Integer",
+              "roof_form": "Enum: Flat / Pitched / Gable / Hip",
+              "core_typology": "Enum: Center_Core / Side_Core / Rear_Core / Split_Core",
+              "base_type": "Enum: Solid_Plinth / Piloti / Sunken"
+            },
+            "2_site_constraints": {
+              "context_type": "Enum: Type_A_Urban_Dense / Type_B_Open_Detached",
+              "blind_wall": "Boolean for Left/Right/Rear"
+            },
+            "3_material": {
+              "base_material_type": "Enum: Exposed_Concrete / Brick_Masonry / Metal_Panel / Glass_CurtainWall / etc",
+              "base_color_hex": "String hex code"
+            },
+            "4_fenestration": {
+              "fenestration_type": "Enum: Punched_Window / Ribbon_Window / Curtain_Wall / Storefront",
+              "window_to_wall_ratio": "Float 0.0~1.0"
+            },
+            "5_articulation": {
+              "has_balcony": true/false,
+              "has_vertical_fins": true/false
+            },
+            "6_mep_assets": {
+              "spawn_hvac_unit": true/false
+            }
+          }
           }
         }
       `;
@@ -997,19 +1001,23 @@ export default function App() {
         if (data.lens_index !== undefined) setLensIndex(Number(data.lens_index));
         if (data.time_index !== undefined) setTimeIndex(Number(data.time_index));
 
-        // --- V2.2: ENSEMBLE PAIR VALIDATION GATE ---
+        // --- V152: PROTOCOL FAIL VERIFICATION (루프 브레이커) ---
+        // 단방향 추론 (One-Way Inference) 원칙: 추출 정보가 불완전하면 즉결 처분(FAIL)하고 중단함 (좀비 객체 방지).
         const hasElevParams = data.elevation_parameters &&
-          data.elevation_parameters['1_Geometry_MASTER'] &&
-          data.elevation_parameters['2_Property_SLAVE'];
+          data.elevation_parameters['1_macro_geometry'] &&
+          data.elevation_parameters['2_site_constraints'] &&
+          data.elevation_parameters['3_material'] &&
+          data.elevation_parameters['4_fenestration'] &&
+          data.elevation_parameters['5_articulation'];
 
         if (!hasElevParams) {
-          console.error('[PROTOCOL-FAIL] Phase 2 검증 실패: AEPL 필수 객체(ENSEMBLE PAIR) 누락');
+          console.error('[PROTOCOL-FAIL] Phase 2 검증 실패: 필수 건축 파라미터(AEPL) 스키마가 누락되었거나 환각 텍스트가 반환되었습니다.');
           setCanvasItems(prev => prev.filter(item => item.id !== itemId));
           setIsAnalyzing(false);
           setIsGenerating(false);
           return false;
         }
-        console.log('[PROTOCOL-PASS] Phase 2 검증 통과: BIM 앙상블 페어 동결 완료');
+        console.log('[PROTOCOL-PASS] Phase 2 검증 통과: 파라미터 완전성 확인');
         // --------------------------------------------------------
 
         const analyzedOpt = {
@@ -1063,39 +1071,38 @@ export default function App() {
   const generateElevations = async (base64Image: string, extractedParams?: any, itemId?: string) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "BIM Lock-on Active";
+      const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
 
-      setAnalysisStep('기하학 절대 객체 락온 중...');
+      setAnalysisStep('입면 데이터 생성 중...');
 
       const base64Data = base64Image.split(',')[1];
       const mimeType = base64Image.split(';')[0].split(':')[1];
 
-      // V2.2: New Sequence (Front -> Top -> Right -> Left -> Rear)
       const viewConfigs = [
-        { key: 'front', label: 'FRONT', angle: '06:00', az: 0, alt: 0, normal: '0, -1, 0' },
-        { key: 'top', label: 'TOP', angle: 'TOP_VIEW', az: 0, alt: 90, normal: '0, 0, 1' },
-        { key: 'right', label: 'RIGHT', angle: '03:00', az: 90, alt: 0, normal: '1, 0, 0' },
-        { key: 'left', label: 'LEFT', angle: '09:00', az: 270, alt: 0, normal: '-1, 0, 0' },
-        { key: 'rear', label: 'REAR', angle: '12:00', az: 180, alt: 0, normal: '0, 1, 0' }
+        { key: 'front', label: 'FRONT', angle: '06:00' },
+        { key: 'right', label: 'RIGHT', angle: '03:00' },
+        { key: 'rear', label: 'REAR', angle: '12:00' },
+        { key: 'left', label: 'LEFT', angle: '09:00' },
+        { key: 'top', label: 'TOP', angle: 'TOP_VIEW' }
       ];
 
       const generateOne = async (config: typeof viewConfigs[0]) => {
         const prompt = `
-          [Protocol B: Visualization Execution Engine v2.2]
+          [Architectural Elevation Generation Protocol - System Protocol V180]
+          TASK: Generate a single ${config.label} orthographic view of the building.
           
-          TASK: Deterministic Rendering of the building's ${config.label} Orthographic View.
-          CONTEXT: [ensemble_pair AEPS-v4] ${contextualParamsStr}
+          [CONTEXT]
+          - Source Image: Use the uploaded photo for material/texture truth.
+          - Architectural Parameters: ${contextualParamsStr}
           
-          [PHASE 1: GEOMETRY MASTER LOCKING]
-          - View: ${config.label} (Angle: ${config.angle}, Axis: ${config.normal})
-          - Camera: Azimuth ${config.az}, Altitude ${config.alt}, Orthographic Projection (FOV=0).
-          - Snap-to: 100% Geometry guide from Source Image.
+          [SPECIFICATION]
+          - View: ${config.label === 'TOP' ? 'Top-down Roof Plan' : `Elevation from ${config.angle} (o'clock)`}
+          - Projection: True Orthographic (FOV=0), zero perspective.
+          - Style: Realistic architectural rendering, matching the source texture.
+          - Background: Pure Transparent Background (Optical Null Space).
+          - Orientation: ${config.label === 'TOP' ? 'Align Front (06:00) to Bottom of frame' : 'Straight on elevation'}
           
-          [PHASE 2: PROPERTY SLAVE INJECTION]
-          - Texture Override: Cast Albedo/PBR/IOR/Aging from Source to all surfaces.
-          - Global Illumination: Fixed GI Matrix for consistent shadows across 5 views.
-          
-          CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
+          CONSTRAINTS: NO text, NO labels, No perspective distortion.
         `.trim();
 
         const result = await ai.models.generateContent({
@@ -1123,10 +1130,10 @@ export default function App() {
 
       const newImages = {
         front: results[0],
-        top: results[1],
-        right: results[2],
+        right: results[1],
+        rear: results[2],
         left: results[3],
-        rear: results[4]
+        top: results[4]
       } as const;
 
       setElevationImages(newImages);
@@ -1157,279 +1164,300 @@ export default function App() {
   };
 
   // ---
-  // PHASE 4: SYNTHESIS & GENERATION (Mother App Unified Controller)
+  // PHASE 4: SYNTHESIS & GENERATION
+  // Layer A (Geometry) + Layer B (5-IVSP Viewpoint) + Layer C (Property Slave)
   // ---
   const handleGenerate = async () => {
-    // 0. FUNCTION MULTIPLEXER
-    if (selectedFunction === 'CHANGE VIEWPOINT') {
-      const sourceItem = selectedItemIds[0]
-        ? canvasItems.find(item => item.id === selectedItemIds[0])
-        : (canvasItems.length > 0 ? canvasItems[0] : null);
+    const sourceItem = selectedItemIds[0]
+      ? canvasItems.find(item => item.id === selectedItemIds[0])
+      : (canvasItems.length > 0 ? canvasItems[0] : null);
 
-      if (!sourceItem) {
-        alert("Please upload at least one image first.");
-        return;
-      }
+    if (!sourceItem) {
+      alert("Please upload at least one image first.");
+      return;
+    }
 
-      // --- V153: PHASE 3 검증 (Viewpoint Configuration Validation) ---
-      const isValidPhase3 = ANGLES[angleIndex] && ALTITUDES[altitudeIndex] && LENSES[lensIndex] && TIMES[timeIndex];
-      if (!isValidPhase3) {
-        console.error('[PROTOCOL-FAIL] Phase 3 검증 실패: 유효하지 않은 5-IVSP 시점 파라미터가 감지되어 재추론을 시도합니다.');
-        return;
-      }
-      console.log('[PROTOCOL-PASS] Phase 3 검증 통과: 5-IVSP 파라미터 셋업 유효함');
+    // --- V153: PHASE 3 검증 (Viewpoint Configuration Validation) ---
+    const isValidPhase3 = ANGLES[angleIndex] && ALTITUDES[altitudeIndex] && LENSES[lensIndex] && TIMES[timeIndex];
+    if (!isValidPhase3) {
+      console.error('[PROTOCOL-FAIL] Phase 3 검증 실패: 유효하지 않은 5-IVSP 시점 파라미터가 감지되어 재추론을 시도합니다.');
+      return; // 국지적 중단 (UI 상태를 끄지는 않고 함수만 빠져나와 사용자가 다시 시도하도록 유도)
+    }
+    console.log('[PROTOCOL-PASS] Phase 3 검증 통과: 5-IVSP 파라미터 셋업 유효함');
 
-      // --- V153: PHASE 4 Pre-flight 검증 (Integration Validation) ---
-      const hasEnsemblePair = sourceItem.src && elevationParams && Object.keys(elevationParams).length > 0;
-      if (!hasEnsemblePair) {
-        console.error('[PROTOCOL-FAIL] Phase 4 (Pre-flight) 검증 실패: ensemble_pair 불일치. 재질/속성 파라미터가 누락되었습니다.');
-        alert('건축 파라미터 속성이 누락되어 렌더링을 차단합니다. 다시 생성 버튼을 눌러주세요.');
-        return;
-      }
-      console.log('[PROTOCOL-PASS] Phase 4 (Pre-flight) 검증 통과: 양손역부족 통과, ensemble_pair 무결성 확인');
+    // --- V153: PHASE 4 Pre-flight 검증 (Integration Validation) ---
+    // 양손역부족 확인: 원본 데이터(Geometry)와 분석된 파라미터(Property)가 모두 존재하는지 확인
+    const hasEnsemblePair = sourceItem.src && elevationParams && Object.keys(elevationParams).length > 0;
+    if (!hasEnsemblePair) {
+      console.error('[PROTOCOL-FAIL] Phase 4 (Pre-flight) 검증 실패: ensemble_pair 불일치. 재질/속성 파라미터가 누락되었습니다. 과거 정보를 역추적하지 않고 이 시점(Phase 4 시작점)에서 재가동 가능성을 타진합니다.');
+      alert('건축 파라미터 속성이 누락되어 렌더링을 차단합니다. 다시 생성 버튼을 눌러주세요.');
+      return; // 중단 (단방향 룰에 따라 돌아가지 않음)
+    }
+    console.log('[PROTOCOL-PASS] Phase 4 (Pre-flight) 검증 통과: 양손역부족 통과, ensemble_pair 무결성 확인');
 
-      const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === sourceItem.id || (i.motherId === undefined && i.id === sourceItem.id)));
-      const isFirstTime = sourceItem.type === 'upload' && !hasInitialViews;
+    // V102: Check if this is the first generation for this mother image
+    const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === sourceItem.id || (i.motherId === undefined && i.id === sourceItem.id)));
+    const isFirstTime = sourceItem.type === 'upload' && !hasInitialViews;
 
-      setIsGenerating(true);
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
+    setIsGenerating(true);
+    // V157: Initialize AbortController
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
-      try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const v0_angle = analyzedOpticalParams?.angle || 'Unknown';
-        const v0_altitude = analyzedOpticalParams?.altitude || 'Unknown';
-        const v0_lens = analyzedOpticalParams?.lens || 'Unknown';
-        const v0_time = analyzedOpticalParams?.time || 'Unknown';
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-        const getAngle = (base: string) => {
-          if (['07:30', '09:00', '10:30'].includes(base)) return '07:30';
-          return '04:30';
-        };
+      const v0_angle = analyzedOpticalParams?.angle || 'Unknown';
+      const v0_altitude = analyzedOpticalParams?.altitude || 'Unknown';
+      const v0_lens = analyzedOpticalParams?.lens || 'Unknown';
+      const v0_time = analyzedOpticalParams?.time || 'Unknown';
 
-        const getSemanticAngle = (base: string) => {
-          switch (base) {
-            case '06:00': return '06:00 (Direct Front / Primary Facade View)';
-            case '04:30': return '04:30 (Front-Right Corner View / 2-Point Perspective)';
-            case '03:00': return '03:00 (Direct Right Side / Profile View)';
-            case '01:30': return '01:30 (Rear-Right Corner View / 2-Point Perspective)';
-            case '12:00': return '12:00 (Direct Rear / Complete Back View)';
-            case '10:30': return '10:30 (Rear-Left Corner View / 2-Point Perspective)';
-            case '09:00': return '09:00 (Direct Left Side / Profile View)';
-            case '07:30': return '07:30 (Front-Left Corner View / 2-Point Perspective)';
-            default: return base;
-          }
-        };
-        const viewsToGenerate = [{
-          name: "Custom View",
-          angle: ANGLES[angleIndex],
-          altitude: ALTITUDES[altitudeIndex].label,
-          lens: LENSES[lensIndex].label,
-          distance: "Standard",
-          scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
-        }];
+      const getAngle = (base: string) => {
+        if (['07:30', '09:00', '10:30'].includes(base)) return '07:30';
+        return '04:30';
+      };
 
-        let actualImageSrc = sourceItem.src;
-        if (sourceItem.type === 'generated' && sourceItem.motherId) {
-          const motherItem = canvasItems.find(i => i.id === sourceItem.motherId);
-          if (motherItem) actualImageSrc = motherItem.src;
+      const getSemanticAngle = (base: string) => {
+        switch (base) {
+          case '06:00': return '06:00 (Direct Front / Primary Facade View)';
+          case '04:30': return '04:30 (Front-Right Corner View / 2-Point Perspective)';
+          case '03:00': return '03:00 (Direct Right Side / Profile View)';
+          case '01:30': return '01:30 (Rear-Right Corner View / 2-Point Perspective)';
+          case '12:00': return '12:00 (Direct Rear / Complete Back View)';
+          case '10:30': return '10:30 (Rear-Left Corner View / 2-Point Perspective)';
+          case '09:00': return '09:00 (Direct Left Side / Profile View)';
+          case '07:30': return '07:30 (Front-Left Corner View / 2-Point Perspective)';
+          default: return base;
         }
+      };
+      const viewsToGenerate = [{
+        name: "Custom View",
+        angle: ANGLES[angleIndex],
+        altitude: ALTITUDES[altitudeIndex].label,
+        lens: LENSES[lensIndex].label,
+        distance: "Standard",
+        scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
+      }];
 
-        const base64Data = actualImageSrc.split(',')[1];
-        const mimeType = actualImageSrc.split(';')[0].split(':')[1];
+      let actualImageSrc = sourceItem.src;
+      // V82: If generating from a generated image, we MUST use the mother image's src for the AI!
+      if (sourceItem.type === 'generated' && sourceItem.motherId) {
+        const motherItem = canvasItems.find(i => i.id === sourceItem.motherId);
+        if (motherItem) {
+          actualImageSrc = motherItem.src;
+        }
+      }
 
-        const generatePromises = viewsToGenerate.map(async (viewConfig) => {
-          const currentTime = TIMES[timeIndex];
-          const layerB_viewpoint = `
+      const base64Data = actualImageSrc.split(',')[1];
+      const mimeType = actualImageSrc.split(';')[0].split(':')[1];
+
+      const generatePromises = viewsToGenerate.map(async (viewConfig) => {
+        const currentTime = TIMES[timeIndex];
+
+        const layerB_viewpoint = `
 # ACTION PROTOCOL (MANDATORY EXECUTION WORKFLOW)
 ## Pre-Step: Reality Anchoring & Camera Delta Calculation
-- V₀ (Current Camera Position): Angle: ${v0_angle} o'clock | Altitude: ${v0_altitude} | Lens: ${v0_lens} | Time: ${v0_time}
-- V₁ (Target Camera Position): Angle: ${getSemanticAngle(viewConfig.angle)} | Altitude: ${viewConfig.altitude} | Lens: ${viewConfig.lens} | Time: ${currentTime}
+- V₀ (Current Camera Position):
+    Angle: ${v0_angle} o'clock | Altitude: ${v0_altitude} | Lens: ${v0_lens} | Time: ${v0_time}
+    This is the exact camera position of IMAGE 1 (Source of Truth).
+- V₁ (Target Camera Position):
+    Angle: ${getSemanticAngle(viewConfig.angle)} | Altitude: ${viewConfig.altitude} | Lens: ${viewConfig.lens} | Time: ${currentTime}
 - Δ Movement Vector: Orbit from ${v0_angle} → ${viewConfig.angle}
-- Target Vector: ${getSemanticAngle(viewConfig.angle)}
-## Step 2: Scenario Mapping & Optical Engineering
-- Scenario: ${viewConfig.scenario} | Lens: ${viewConfig.lens} | Time of Day: ${currentTime}`;
+    CRITICAL CONSTRAINT: You MUST execute this precise Physical Camera Orbit. DO NOT simply output the V₀ view again.
 
-          const layerC_property = elevationParams ? `
+## Step 1: Coordinate Anchoring & Vector Calculation
+- Clock-face Protocol: 06:00 = Front, 03:00 = Right, 09:00 = Left, 12:00 = Rear.
+- Target Vector: ${getSemanticAngle(viewConfig.angle)}
+- Constraint: The output image MUST clearly display the ${getSemanticAngle(viewConfig.angle)} view, utilizing IMAGE 2 as the geometric blueprint for that side.
+
+## Step 2: Scenario Mapping & Optical Engineering
+- Scenario: ${viewConfig.scenario}
+- Lens: ${viewConfig.lens}
+- Time of Day: ${currentTime}`;
+
+        const layerC_property = elevationParams
+          ? `
 ## Step 5: Structural & Material Parameters (PHASE 2 AEPL Data — Immutable)
 - Mass Typology: ${elevationParams['1_macro_geometry']?.mass_typology || 'N/A'}
 - Roof Form: ${elevationParams['1_macro_geometry']?.roof_form || 'N/A'}
+- Core Typology: ${elevationParams['1_macro_geometry']?.core_typology || 'N/A'}
+- Standard Context: ${elevationParams['2_site_constraints']?.context_type || 'N/A'}
 - Base Material: ${elevationParams['3_material']?.base_material_type || 'N/A'}
-- Fenestration: ${elevationParams['4_fenestration']?.fenestration_type || 'N/A'}` : '';
+- Fenestration: ${elevationParams['4_fenestration']?.fenestration_type || 'N/A'}
+- Balcony/Projection: ${elevationParams['5_articulation']?.has_balcony || 'False'}`
+          : '';
 
-          const layerC_blindspot = `## Step 3: Layering & Blind Spot Inference (Void Mitigation)
-- Context Void Mitigation: Synchronize Foreground/Background.
-- Material Injection: Lock original textures. Relighting only for solar angle (${currentTime}).`;
+        const layerC_blindspot = `
+## Step 3: Layering & Blind Spot Inference (Void Mitigation)
+- Context Void Mitigation: If orbiting to Rear (12:00) or Side, synchronize Foreground/Background. Spawn the adjacent building's mass scale and skyline contour as background context to prevent a white spatial void.
+- Geometry/Texture Void Mitigation: Adhere strictly to the "ensemble_pair" rule. DO NOT hallucinate arbitrary forms. Focus 100% of pixel generation on "Surface Texture" and "Dynamic AO (Ambient Occlusion)" for depth. Extract Design DNA from Front to logically place Service Doors/MEP details on blind spots.
+- Material Injection: Lock original textures. Apply Relighting only for new solar angle (${currentTime}).`;
 
-          let activeElevationSlots = getElevationSlot(viewConfig.angle);
-          if (activeElevationSlots.length === 0) activeElevationSlots = getElevationSlot("06:00");
-          const elevationLabel = activeElevationSlots.map(s => s.label).join('+');
-
-          const finalPrompt = `
-# SYSTEM: 5-Point Integrated Viewpoint Simulation Architect (5-IVSP)
-# GOAL: Change the angle of view of the provided architectural image.
-- Geometric Sanctuary: The building's proportions are Immutable Constants.
-# INPUT IMAGES: IMAGE 1 (Primary) + IMAGE 2 (Geometric Reference: ${elevationLabel})
-${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
-[GENERATE IMAGE NOW]`.trim();
-
-          const runGen = async (modelName: string) => {
-            const parts: any[] = [{ inlineData: { data: base64Data, mimeType: mimeType } }];
-            if (elevationImages) {
-              for (const slot of activeElevationSlots) {
-                const imgData = (elevationImages as any)[slot.label.toLowerCase()];
-                if (imgData) parts.push({ inlineData: { data: imgData.split(',')[1], mimeType: 'image/png' } });
-              }
-            }
-            parts.push({ text: finalPrompt });
-            const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
-            if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) return false;
-
-            if (response.candidates?.[0]?.content?.parts) {
-              for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData) {
-                  const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                  await new Promise<void>((resolve) => {
-                    const img = new Image();
-                    img.onload = () => {
-                      const updatedOpticalParams = { angle: ANGLES[angleIndex], altitude: ALTITUDES[altitudeIndex].label, lens: LENSES[lensIndex].label, time: TIMES[timeIndex] };
-                      const newGenItem: CanvasItem = {
-                        id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                        type: 'generated',
-                        src: generatedSrc,
-                        x: 0, y: sourceItem.y,
-                        width: img.width * 0.3, height: img.height * 0.3,
-                        motherId: sourceItem.motherId || sourceItem.id,
-                        parameters: {
-                          angleIndex, altitudeIndex, lensIndex, timeIndex,
-                          analyzedOpticalParams: updatedOpticalParams,
-                          elevationParams, sitePlanImage, elevationImages
-                        }
-                      };
-                      setCanvasItems(prev => {
-                        setHistoryStates(prevH => [...prevH, prev]);
-                        const siblings = prev.filter(i => i.type === 'generated' && (i.motherId === sourceItem.id || i.motherId === sourceItem.motherId));
-                        if (siblings.length === 0) {
-                          newGenItem.x = sourceItem.x + sourceItem.width + 120;
-                          newGenItem.y = (sourceItem.y + sourceItem.height * 0.25) - newGenItem.height;
-                        } else {
-                          const bottomMost = siblings.reduce((p, c) => (c.y + c.height > p.y + p.height) ? c : p, siblings[0]);
-                          newGenItem.x = bottomMost.x;
-                          newGenItem.y = bottomMost.y + bottomMost.height + 96;
-                        }
-                        return [...prev, newGenItem];
-                      });
-                      setSelectedItemIds([newGenItem.id]);
-                      if (!isFirstTime) setActiveTab('result');
-                      resolve();
-                    };
-                    img.src = generatedSrc;
-                  });
-                  return true;
-                }
-              }
-            }
-            return false;
-          };
-
-          try {
-            const success = await runGen(IMAGE_GEN);
-            if (!success) throw new Error("Fallback needed");
-          } catch (e) {
-            await runGen(IMAGE_GEN_FALLBACK).catch(err => console.error("Generation failed", err));
-          }
-        });
-        await Promise.all(generatePromises);
-      } catch (error) {
-        console.error("Generation Error:", error);
-        alert("An error occurred during generation.");
-      } finally {
-        setIsGenerating(false);
-        abortControllerRef.current = null;
-      }
-    }
-
-    else if (selectedFunction === 'SKETCH TO IMAGE') {
-      if (!sketchMode || !sketchStyle) {
-        alert("Please select both MODE and STYLE.");
-        return;
-      }
-
-      setIsGenerating(true);
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const styleInfo = STYLE_DESCRIPTIONS[sketchStyle];
-        const keywordsStr = styleInfo ? styleInfo.keywords.map(k => k.en).join(', ') : '';
-
-        const systemPrompt = `
-          [Architecture Blueprint Protocol - Sketch to Image V250]
-          TASK: Transform the user's architectural sketch or description into a completed, realistic building.
-          
-          [CORE PRINCIPLES]
-          - Ontological Status: The output must be a "Finished Building Photography."
-          - Architectural Style: ${styleInfo?.title.en} (${keywordsStr}).
-          - Mode: ${sketchMode} (${sketchMode === 'CONCEPT' ? 'Focus on creative suggestion and atmosphere.' : 'Focus on preserving the original sketch geometry strictly.'})
-          
-          [SPECIFICATION]
-          - Format: High-quality architectural rendering (Fujifilm GFX 100S, 8k resolution).
-          - Aspect Ratio: ${aspectRatio}
-          - Quality: ${resolution}
-          - Lighting: Pure architectural light, matching the style description.
-          
-          [CONSTRAINTS]
-          - NO text, NO labels, NO humans unless specified.
-          - Clean orthographic-leaning perspective.
-        `.trim();
+        let activeElevationSlots = getElevationSlot(viewConfig.angle);
+        if (activeElevationSlots.length === 0) activeElevationSlots = getElevationSlot("06:00");
+        const elevationLabel = activeElevationSlots.map(s => s.label).join('+');
 
         const finalPrompt = `
-          User Description: ${sketchPrompt || "A generic building in the specified style."}
-          Please generate the image now adhering to the Blueprint Protocol.
+# SYSTEM: 5-Point Integrated Viewpoint Simulation Architect (5-IVSP)
+
+# GOAL
+Change the angle of view of the provided architectural image to a specific new perspective without altering the building's original geometry, materials, or style. Execute a "Physical Movement Command" within a completed 3D reality — precise Coordinate-Based Virtual Photography.
+
+# INPUT IMAGES
+- IMAGE 1 (Primary): The original uploaded architectural photo. Source of Truth for materials and visible geometry.
+${activeElevationSlots.length === 1
+            ? `- IMAGE 2 (Geometric Reference): The pre-computed ${elevationLabel} elevation orthographic drawing, generated by PHASE 2 architectural inference. Use this as the STRICT geometric blueprint for the target viewpoint. The architectural form, proportions, and element placement MUST be reflected in the output.`
+            : `- IMAGE 2 (Geometric Reference A): The pre-computed ${activeElevationSlots[0].label} elevation — first adjacent face for this corner viewpoint.
+- IMAGE 3 (Geometric Reference B): The pre-computed ${activeElevationSlots[1]?.label || activeElevationSlots[0].label} elevation — second adjacent face for this corner viewpoint.
+  Both elevations are pre-computed by PHASE 2. Use them as the STRICT geometric blueprint. The 2-Point Perspective output MUST integrate both faces correctly.`
+          }
+
+# CONTEXT
+- Ontological Status: The input image is a "Completed Architectural Reality." Fixed physical object, not a sketch.
+- Geometric Sanctuary: The building's proportions, structure, and ALL details are Immutable Constants. Only the observer (Brown Point) moves.
+- Operational Logic: Intuition-to-Coordinate Translation applied.
+
+# ROLE
+Coordinate Controller & Virtual Architectural Photographer.
+${layerB_viewpoint}
+${layerC_blindspot}
+${layerC_property}
+
+## Step 4: Final Execution & Compliance Check
+- Command: Orbit the Brown Point to the target coordinate and capture the Completed Reality using the optical setup from Step 2.
+- Compliance:
+  [ ] Original geometry preserved 100%? (No Hallucination)
+  [ ] Perspective mathematically correct? (No Distortion)
+  [ ] Blind spot logically inferred? (No Blank Spaces)
+  [ ] IMAGE 2 elevation geometry reflected in output? (No Deviation)
+
+[GENERATE IMAGE NOW]
         `.trim();
 
         const runGen = async (modelName: string) => {
-          const parts: any[] = [{ text: systemPrompt }, { text: finalPrompt }];
-          
-          // If we have a selected image, we can use it as a reference (sketch)
-          const sourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : null;
-          if (sourceItem) {
-            const base64Data = sourceItem.src.split(',')[1];
-            const mimeType = sourceItem.src.split(';')[0].split(':')[1];
-            parts.unshift({ inlineData: { data: base64Data, mimeType: mimeType } });
+          const parts: any[] = [
+            { inlineData: { data: base64Data, mimeType: mimeType } },
+          ];
+
+          if (elevationImages) {
+            for (const slot of activeElevationSlots) {
+              const viewKey = slot.label.toLowerCase() as keyof typeof elevationImages;
+              const imgData = (elevationImages as any)[viewKey];
+              if (imgData) {
+                const imgBase64 = imgData.split(',')[1];
+                parts.push({ inlineData: { data: imgBase64, mimeType: 'image/png' } });
+                console.log(`[V180] Injecting direct elevation: ${slot.label}`);
+              }
+            }
           }
 
-          const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
-          if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) return false;
+          parts.push({ text: finalPrompt });
 
-          if (response.candidates?.[0]?.content?.parts) {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: { parts },
+          });
+
+          // [V162] CANCEL 예외 처리: API 응답을 받았으나 이미 취소 상태인 경우 버림
+          if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) {
+            console.log("[V162] Generation aborted by user, discarding API result.");
+            return false;
+          }
+
+          let validImageGenerated = false;
+
+          if (response.candidates && response.candidates[0]?.content?.parts) {
             for (const part of response.candidates[0].content.parts) {
               if (part.inlineData) {
+                validImageGenerated = true;
                 const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+
                 await new Promise<void>((resolve) => {
                   const img = new Image();
                   img.onload = () => {
+                    // V109: Reverse-lookup exact indices from viewConfig to snapshot each image's true params
+                    let snapAngleIndex = Math.max(0, ANGLES.findIndex(a => viewConfig.angle.startsWith(a)));
+                    if (viewConfig.name === "Street View") {
+                      // V111: Explicit index matching for Street View since prompt is "AI Choice..."
+                      const baseAngle = v0_angle === 'Unknown' ? '06:00' : v0_angle;
+                      const cornerAngle = getAngle(baseAngle);
+                      snapAngleIndex = Math.max(0, ANGLES.findIndex(a => a === cornerAngle));
+                    }
+
+                    const snapLensIndex = Math.max(0, LENSES.findIndex(l => viewConfig.lens.includes(String(l.value))));
+
+                    // V111: Robust parsing for altitude using regex to avoid partial matches (e.g. 150m matching 0m)
+                    const altMatch = viewConfig.altitude.match(/^(-?\d+(\.\d+)?)m/);
+                    const altValue = altMatch ? parseFloat(altMatch[1]) : 1.6;
+                    const snapAltIndex = Math.max(0, ALTITUDES.findIndex(a => a.value === altValue));
+
+                    // V139: Generated image scales to 30%
+                    const generatedScaledWidth = img.width * 0.3;
+                    const generatedScaledHeight = img.height * 0.3;
+
+                    // V161: 생성 이미지 전용 Optical Parameter 재구성 (새로운 시점 갱신)
+                    const updatedOpticalParams = {
+                      angle: ANGLES[snapAngleIndex],
+                      altitude: ALTITUDES[snapAltIndex].label,
+                      lens: LENSES[snapLensIndex].label,
+                      time: TIMES[timeIndex]
+                    };
+
                     const newGenItem: CanvasItem = {
-                      id: `sketch-${Date.now()}`,
+                      id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                       type: 'generated',
                       src: generatedSrc,
-                      x: sourceItem ? sourceItem.x + sourceItem.width + 120 : 0,
-                      y: sourceItem ? sourceItem.y : 0,
-                      width: img.width * 0.4,
-                      height: img.height * 0.4,
-                      motherId: sourceItem ? (sourceItem.motherId || sourceItem.id) : null,
+                      x: 0,
+                      y: sourceItem.y,
+                      width: generatedScaledWidth,
+                      height: generatedScaledHeight,
+                      motherId: sourceItem.motherId || sourceItem.id,
                       parameters: {
-                        angleIndex: 4, altitudeIndex: 2, lensIndex: 1, timeIndex: 2,
-                        analyzedOpticalParams: { angle: '06:00', altitude: '1.6m', lens: '24mm', time: '12:00' },
-                        elevationParams: null
+                        angleIndex: snapAngleIndex,
+                        altitudeIndex: snapAltIndex,
+                        lensIndex: snapLensIndex,
+                        timeIndex,
+                        analyzedOpticalParams: updatedOpticalParams, // V161 Update
+                        elevationParams,
+                        sitePlanImage,
+                        elevationImages
                       }
                     };
+
                     setCanvasItems(prev => {
                       setHistoryStates(prevH => [...prevH, prev]);
+
+                      // V139: Determine placement
+                      const motherItem = sourceItem;
+                      const siblingsInPrev = prev.filter(i => i.type === 'generated' && (i.motherId === motherItem.id || i.motherId === motherItem.motherId));
+                      const isFirstGenerated = siblingsInPrev.length === 0;
+
+                      let currentX: number;
+                      let currentY: number;
+
+                      if (isFirstGenerated) {
+                        // V143: First generated image: right of mother, bottom aligned to 25% down the mother's height
+                        currentX = motherItem.x + motherItem.width + 120;
+                        currentY = (motherItem.y + motherItem.height * 0.25) - generatedScaledHeight;
+                      } else {
+                        // V146: Subsequent images: vertical stack below the bottom-most sibling
+                        const bottomMostSibling = siblingsInPrev.reduce((prevBot, curr) =>
+                          (curr.y + curr.height > prevBot.y + prevBot.height) ? curr : prevBot,
+                          siblingsInPrev[0]
+                        );
+                        currentX = bottomMostSibling.x;
+                        currentY = bottomMostSibling.y + bottomMostSibling.height + 96;
+                      }
+
+                      newGenItem.x = currentX;
+                      newGenItem.y = currentY;
+
                       return [...prev, newGenItem];
                     });
                     setSelectedItemIds([newGenItem.id]);
+                    // Single view manually triggered changes instantly
+                    // Batch view shouldn't swap tab wildly, but result is fine
+                    if (!isFirstTime) setActiveTab('result');
                     resolve();
                   };
                   img.src = generatedSrc;
@@ -1438,83 +1466,35 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
               }
             }
           }
-          return false;
+
+          // --- V153: PHASE 4 Post-flight 검증 ---
+          if (!validImageGenerated) {
+            console.error('[PROTOCOL-FAIL] Phase 4 (Post-flight) 검증 실패: 유효한 렌더링 이미지가 반환되지 않았습니다. API 재호출(Phase 4 재추론)을 시도합니다.');
+          } else {
+            console.log('[PROTOCOL-PASS] Phase 4 (Post-flight) 검증 통과: 유효한 통합 이미지 렌더링 성공');
+          }
+          return validImageGenerated;
         };
 
-        const success = await runGen(IMAGE_GEN);
-        if (!success) await runGen(IMAGE_GEN_FALLBACK);
+        try {
+          const success = await runGen(IMAGE_GEN);
+          if (!success) throw new Error("Fallback needed");
+        } catch (e) {
+          const successFallback = await runGen(IMAGE_GEN_FALLBACK);
+          if (!successFallback) {
+            console.error("Failed to generate view with fallback");
+          }
+        }
+      }); // End of viewsToGenerate map
 
-      } catch (err) {
-        console.error("Sketch to Image error", err);
-        alert("Sketch generation failed.");
-      } finally {
-        setIsGenerating(false);
-        abortControllerRef.current = null;
-      }
-    }
+      await Promise.all(generatePromises);
 
-    else if (selectedFunction === 'PLANNERS') {
-      if (!plannerCode) {
-        alert("Please enter the project code.");
-        return;
-      }
-      setIsGenerating(true);
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      setAnalysisStep('Expert team briefing started...');
-      try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const agentsStr = plannerAgents.length > 0 ? plannerAgents.join(', ') : 'All Experts';
-        const prompt = `
-          [Architectural Planner Expert Team - System Protocol V250]
-          You are a team of expert planners: ${agentsStr}.
-          Analyze the following project code/description: "${plannerCode}"
-          Provide a professional briefing and strategic feedback. 
-          Respond in a concise, authoritative architectural consultant tone.
-        `;
-        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: prompt }] } });
-        if (controller.signal.aborted) return;
-        const feedback = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        console.log("PLANNER FEEDBACK:", feedback);
-        alert("Planner feedback received. Check console for details.");
-      } catch (err) {
-        if (err.name !== 'AbortError') console.error("Planner error", err);
-      } finally {
-        setIsGenerating(false);
-        setAnalysisStep('');
-        abortControllerRef.current = null;
-      }
-    }
-
-    else if (selectedFunction === 'PRINT') {
-      if (!printPrompt) {
-        alert("Please enter the printing requirements.");
-        return;
-      }
-      setIsGenerating(true);
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-      setAnalysisStep(`Generating ${printPages} pages of ${printTemplate}...`);
-      try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const prompt = `
-          [Architectural Print Engine - System Protocol V250]
-          Generate a ${printTemplate} document based on: "${printPrompt}"
-          Number of pages requested: ${printPages}.
-          Output as a structured textual report.
-        `;
-        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: prompt }] } });
-        if (controller.signal.aborted) return;
-        const feedback = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        console.log("PRINT OUTPUT:", feedback);
-        alert("Print report generated successfully.");
-      } catch (err) {
-        if (err.name !== 'AbortError') console.error("Print error", err);
-      } finally {
-        setIsGenerating(false);
-        setAnalysisStep('');
-        abortControllerRef.current = null;
-      }
+    } catch (error) {
+      console.error("Generation Error:", error);
+      alert("An error occurred during generation.");
+    } finally {
+      setIsGenerating(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -1903,130 +1883,104 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         </button>
                       </div>
 
-                      {/* V180/V2.2: Item-bound Library Artboard (Architecture Sheet) */}
+                      {/* V75/V81/V160: Item-bound Library Artboard */}
                       {openLibraryItemId === item.id && (
                         <div
-                          className="absolute flex flex-col bg-[#121212] text-white shadow-2xl rounded-2xl p-0 pointer-events-auto cursor-default overflow-hidden border border-white/10"
+                          className="absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 pointer-events-auto cursor-default"
                           style={{
                             left: 'calc(100% + 12px)',
                             top: 0,
-                            width: '850px',
-                            height: '650px',
-                            fontFamily: "'Pretendard', sans-serif"
+                            width: '800px',
+                            height: '600px',
+                            border: 'none',
                           }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
-                          {/* Header & Tabs */}
-                          <div className="flex justify-between items-center px-6 py-4 shrink-0 bg-black/40 border-b border-white/5">
-                            <h2 className="font-display text-2xl tracking-widest text-[#F4C430]">
-                              {artboardPage === 1 && "01_ANALYSIS REPORT"}
-                              {artboardPage === 2 && "02_FRONT VIEW (06:00)"}
-                              {artboardPage === 3 && "03_TOP VIEW (PLAN)"}
-                              {artboardPage === 4 && "04_RIGHT VIEW (03:00)"}
-                              {artboardPage === 5 && "05_LEFT VIEW (09:00)"}
-                              {artboardPage === 6 && "06_REAR VIEW (12:00)"}
-                            </h2>
-                            <div className="flex gap-1.5">
+                          {/* V180: Header & Tabs */}
+                          <div className="flex justify-between items-center mb-4 shrink-0">
+                            <span className="font-mono text-xs tracking-widest uppercase font-bold text-black/70 dark:text-white/70">
+                              {artboardPage === 1 && "1. ANALYSIS REPORT"}
+                              {artboardPage === 2 && "2. FRONT VIEW (06:00)"}
+                              {artboardPage === 3 && "3. RIGHT VIEW (03:00)"}
+                              {artboardPage === 4 && "4. REAR VIEW (12:00)"}
+                              {artboardPage === 5 && "5. LEFT VIEW (09:00)"}
+                              {artboardPage === 6 && "6. TOP VIEW"}
+                            </span>
+                            <div className="flex gap-2">
                               {[1, 2, 3, 4, 5, 6].map((p) => (
                                 <button
                                   key={p}
                                   onClick={() => setArtboardPage(p)}
-                                  className={`w-9 h-9 flex items-center justify-center rounded-lg text-sm font-mono transition-all
-                                    ${artboardPage === p 
-                                      ? 'bg-[#F4C430] text-black font-bold scale-110' 
-                                      : 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white'}`}
+                                  className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-mono transition-colors ${artboardPage === p ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
                                 >
-                                  {String(p).padStart(2, '0')}
+                                  {p}
                                 </button>
                               ))}
-                              <button onClick={() => setOpenLibraryItemId(null)} className="ml-2 w-9 h-9 flex items-center justify-center rounded-lg bg-white/5 hover:bg-red-500/20 text-white/40 hover:text-red-500 transition-colors">
-                                <X size={18} />
-                              </button>
                             </div>
                           </div>
 
-                          {/* Content Area */}
-                          <div className="flex-1 w-full overflow-hidden bg-black/20 flex flex-col">
+                          {/* V180: Content */}
+                          <div className="flex-1 w-full border border-black/10 dark:border-white/10 rounded-xl overflow-hidden bg-black/5 flex">
                             {artboardPage === 1 ? (
-                              /* Page 1: Analysis Report (BIM AEPL Schema) */
-                              <div className="flex w-full h-full p-6 gap-6">
+                              /* Page 1: Extracted Details (Analysis Report) */
+                              <div className="flex w-full h-full">
                                 {/* Left: Source Image */}
-                                <div className="w-[40%] h-full flex flex-col">
-                                  <span className="font-display text-sm uppercase text-[#F4C430] mb-3 tracking-[0.2em] block">SOURCE DIAGNOSIS</span>
-                                  <div className="flex-1 w-full bg-white/5 rounded-2xl border border-white/5 p-4 flex items-center justify-center overflow-hidden">
-                                    <img src={item.src} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" alt="Source" />
+                                <div className="w-[45%] h-full p-4 border-r border-black/10 dark:border-white/10 flex flex-col">
+                                  <span className="font-mono text-[10px] uppercase opacity-50 mb-3 tracking-widest block text-center">Source Image</span>
+                                  <div className="flex-1 w-full relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-lg border border-black/5 dark:border-white/5 p-2 overflow-hidden">
+                                    <img src={item.src} className="max-w-full max-h-full object-contain rounded drop-shadow-md" alt="Source" />
                                   </div>
                                 </div>
 
-                                {/* Right: AEPL Parameters */}
-                                <div className="w-[60%] h-full flex flex-col">
-                                  <span className="font-display text-sm uppercase text-[#F4C430] mb-3 tracking-[0.2em] block">BIM AEPL PARAMETERS (V4)</span>
-                                  <div className="flex-1 bg-white/5 rounded-2xl border border-white/5 p-6 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed">
-                                    {item.parameters?.elevationParams ? (
-                                      <div className="space-y-6">
-                                        <section>
-                                          <h4 className="text-[#F4C430] border-b border-white/10 pb-1 mb-2 font-bold uppercase tracking-wider">1_Geometry_MASTER</h4>
-                                          <pre className="text-white/60 bg-black/30 p-4 rounded-xl">
-                                            {JSON.stringify(item.parameters.elevationParams['1_Geometry_MASTER'] || item.parameters.elevationParams['1_macro_geometry'], null, 2)}
-                                          </pre>
-                                        </section>
-                                        <section>
-                                          <h4 className="text-[#F4C430] border-b border-white/10 pb-1 mb-2 font-bold uppercase tracking-wider">2_Property_SLAVE</h4>
-                                          <pre className="text-white/60 bg-black/30 p-4 rounded-xl">
-                                            {JSON.stringify(item.parameters.elevationParams['2_Property_SLAVE'] || item.parameters.elevationParams['3_material'], null, 2)}
-                                          </pre>
-                                        </section>
-                                      </div>
-                                    ) : (
-                                      <div className="h-full flex flex-col items-center justify-center opacity-30 italic">
-                                        <Loader2 className="animate-spin mb-2" />
-                                        <span>Waiting for Deterministic BIM Compilation...</span>
-                                      </div>
-                                    )}
-                                  </div>
+                                {/* Right: Extracted Text Parameters */}
+                                <div className="w-[55%] h-full p-6 overflow-y-auto font-mono text-[11px] leading-relaxed custom-scrollbar">
+                                  <span className="font-mono text-[10px] uppercase opacity-50 block mb-4 tracking-widest">Extracted Parameters</span>
+
+                                  {item.parameters?.analyzedOpticalParams && (
+                                    <div className="mb-6">
+                                      <h4 className="font-bold mb-2 text-blue-600 dark:text-blue-400 border-b border-black/10 dark:border-white/10 pb-1">Optical Parameters</h4>
+                                      <pre className="whitespace-pre-wrap text-[10px] bg-white/50 dark:bg-black/50 p-3 rounded-lg border border-black/5 dark:border-white/5">
+                                        {JSON.stringify(item.parameters.analyzedOpticalParams, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {item.parameters?.elevationParams ? (
+                                    <div>
+                                      <h4 className="font-bold mb-2 text-teal-600 dark:text-teal-400 border-b border-black/10 dark:border-white/10 pb-1">Architectural Parameters (AEPL)</h4>
+                                      <pre className="whitespace-pre-wrap text-[10px] bg-white/50 dark:bg-black/50 p-3 rounded-lg border border-black/5 dark:border-white/5">
+                                        {JSON.stringify(item.parameters.elevationParams, null, 2)}
+                                      </pre>
+                                    </div>
+                                  ) : (
+                                    <div className="mt-4 p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-center">
+                                      No AEPL Parameters Found
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
-                              /* Pages 2-6: Elevation Sheets (Template-Layout) */
-                              <div className="relative w-full h-full bg-[#121212] flex items-center justify-center p-8">
+                              /* Pages 2-5: Elevation Views */
+                              <div className="relative w-full h-full flex items-center justify-center p-4">
                                 {(() => {
-                                  const views = [
-                                    { key: 'front', label: 'FRONT= 정면= 06:00' },
-                                    { key: 'top', label: 'TOP= 평면/탑' },
-                                    { key: 'right', label: 'RIGHT= 우측면= 03:00' },
-                                    { key: 'left', label: 'LEFT= 좌측면= 09:00' },
-                                    { key: 'rear', label: 'REAR= 배면= 12:00' },
-                                  ];
-                                  const currentView = views[artboardPage - 2];
-                                  const imgSrc = elevationImages[currentView.key as keyof typeof elevationImages];
+                                  const views = item.parameters?.elevationImages;
+                                  let displayImg = null;
+                                  if (artboardPage === 2) displayImg = views?.front;
+                                  if (artboardPage === 3) displayImg = views?.right;
+                                  if (artboardPage === 4) displayImg = views?.rear;
+                                  if (artboardPage === 5) displayImg = views?.left;
+                                  if (artboardPage === 6) displayImg = views?.top;
 
-                                  return (
-                                    <div className="w-full h-full relative flex flex-col pt-12">
-                                      {/* Title Overlay */}
-                                      <h1 className="absolute top-0 left-0 font-display text-4xl text-white tracking-[2px] leading-none uppercase">
-                                        IMAGE TO ELEVATION: {currentView.label}
-                                      </h1>
-                                      
-                                      {/* Image Wrapper */}
-                                      <div className="flex-1 w-full bg-white/5 rounded-t-2xl border-x border-t border-white/5 flex items-center justify-center relative overflow-hidden">
-                                        {imgSrc ? (
-                                          <img src={imgSrc} className="max-w-full max-h-full object-contain" alt={currentView.label} />
-                                        ) : (
-                                          <div className="flex flex-col items-center gap-3 opacity-20">
-                                            <Loader2 className="animate-spin" size={40} />
-                                            <span className="font-display tracking-[0.2em]">GENERATING VIEW...</span>
-                                          </div>
-                                        )}
+                                  if (displayImg) {
+                                    return <img src={displayImg} className="max-w-full max-h-full object-contain mix-blend-multiply dark:mix-blend-screen" alt={`Page ${artboardPage}`} />;
+                                  } else {
+                                    return (
+                                      <div className="flex flex-col items-center gap-4">
+                                        <Loader2 size={32} className="animate-spin text-black/20 dark:text-white/20" />
+                                        <p className="font-mono opacity-40 uppercase tracking-widest text-[12px]">Generating Elevation Data...</p>
                                       </div>
-
-                                      {/* Label Item (Yellow Bar) */}
-                                      <div className="h-14 bg-[#F4C430] flex items-center justify-center rounded-b-2xl shadow-lg shrink-0">
-                                        <strong className="text-black font-medium text-lg tracking-[2px] uppercase">
-                                          {currentView.label}
-                                        </strong>
-                                      </div>
-                                    </div>
-                                  );
+                                    );
+                                  }
                                 })()}
                               </div>
                             )}
@@ -2275,10 +2229,10 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                           {['CONCEPT', 'DETAIL'].map(mode => (
                             <button
                               key={mode}
-                              onClick={() => setSketchMode(prev => prev === mode ? '' : mode)}
-                              className={`flex-1 h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[14px] transition-all border border-black/10 dark:border-white/10
+                              onClick={() => setSketchMode(mode)}
+                              className={`flex-1 h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[13px] transition-all border border-black/10 dark:border-white/10
                                 ${sketchMode === mode
-                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                  ? 'bg-black text-white dark:bg-white dark:text-black border-transparent'
                                   : 'bg-transparent text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
                             >
                               {mode}
@@ -2288,7 +2242,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                       </div>
 
                       {/* STYLE GRID + DETAIL PANEL GROUP */}
-                      <div className="flex flex-col gap-5 shrink-0">
+                      <div className="flex flex-col gap-3 flex-1 min-h-0">
                         <div className="shrink-0">
                           <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">CRE-TE STYLE</span>
                           <div className="grid grid-cols-4 gap-1.5">
@@ -2296,14 +2250,13 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                               <button
                                 key={style}
                                 onClick={() => {
-                                  const nextStyle = sketchStyle === style ? 'NONE' : style;
-                                  setSketchStyle(nextStyle);
-                                  if (nextStyle !== 'NONE') setActiveDetailStyle(nextStyle);
+                                  setSketchStyle(style);
+                                  if (style !== 'NONE') setActiveDetailStyle(style);
                                   else setActiveDetailStyle(null);
                                 }}
-                                className={`h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[14px] border border-black/10 dark:border-white/10 transition-all
+                                className={`h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[13px] border border-black/10 dark:border-white/10 transition-all
                                   ${sketchStyle === style
-                                    ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                    ? 'bg-black text-white dark:bg-white dark:text-black'
                                     : 'bg-white/80 dark:bg-black/80 text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
                               >
                                 {style}
@@ -2312,87 +2265,41 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                           </div>
                         </div>
 
-                        {activeDetailStyle && (
-                          <div className="h-[200px] overflow-hidden transition-all duration-500 ease-in-out">
-                            {STYLE_DESCRIPTIONS[activeDetailStyle] ? (
-                              <div className="h-full bg-black/5 dark:bg-white/5 rounded-[20px] p-4 relative border border-black/5 dark:border-white/5 flex flex-col">
-                                <div className="shrink-0 mb-3 pr-8">
-                                  <h4 className="font-bold text-[13px] leading-tight">
-                                    {STYLE_DESCRIPTIONS[activeDetailStyle].title.ko}
-                                    <br />
-                                    _{STYLE_DESCRIPTIONS[activeDetailStyle].title.en}
-                                  </h4>
-                                  <button onClick={() => setActiveDetailStyle(null)} className="absolute top-3 right-3 p-1.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-colors group z-20">
-                                    <X size={14} className="opacity-40 group-hover:opacity-100 transition-opacity" />
-                                  </button>
-                                </div>
-                                <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
-                                  <ul className="space-y-3 pb-2">
-                                    {STYLE_DESCRIPTIONS[activeDetailStyle].keywords.map((kw, idx) => (
-                                      <li key={idx} className="flex items-start">
-                                        <span className="mr-2 mt-1.5 w-1 h-1 rounded-full bg-current shrink-0 opacity-40" />
-                                        <div className="flex flex-col">
-                                          <span className="text-[11px] font-medium leading-tight">{kw.en}</span>
-                                          <span className="text-[11px] opacity-50 leading-tight">({kw.ko})</span>
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
+                        <div className={`flex-1 min-h-0 overflow-hidden transition-all duration-500 ease-in-out ${activeDetailStyle ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+                          {activeDetailStyle && STYLE_DESCRIPTIONS[activeDetailStyle] ? (
+                            <div className="h-full bg-black/5 dark:bg-white/5 rounded-[20px] p-4 relative border border-black/5 dark:border-white/5 flex flex-col">
+                              <div className="shrink-0 mb-3 pr-8">
+                                <h4 className="font-bold text-[13px] leading-tight">
+                                  {STYLE_DESCRIPTIONS[activeDetailStyle].title.ko}
+                                  <br />
+                                  _{STYLE_DESCRIPTIONS[activeDetailStyle].title.en}
+                                </h4>
+                                <button onClick={() => setActiveDetailStyle(null)} className="absolute top-3 right-3 p-1.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-colors group z-20">
+                                  <X size={14} className="opacity-40 group-hover:opacity-100 transition-opacity" />
+                                </button>
                               </div>
-                            ) : null}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* ASPECT RATIO */}
-                      <div className="shrink-0">
-                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">Aspect Ratio</span>
-                        <div className="flex gap-2">
-                          {['1:1', '4:3', '16:9'].map(ratio => (
-                            <button
-                              key={ratio}
-                              onClick={() => setAspectRatio(ratio)}
-                              className={`flex-1 h-[36px] rounded-full font-display tracking-widest uppercase font-medium text-[12px] transition-all border border-black/10 dark:border-white/10
-                                ${aspectRatio === ratio
-                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
-                                  : 'bg-transparent text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                            >
-                              {ratio}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* RESOLUTION */}
-                      <div className="shrink-0">
-                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">Resolution</span>
-                        <div className="flex gap-2">
-                          {['FAST', 'NORMAL', 'HIGH'].map(res => (
-                            <button
-                              key={res}
-                              onClick={() => setResolution(res + ' QUALITY')}
-                              className={`flex-1 h-[36px] rounded-full font-display tracking-widest uppercase font-medium text-[12px] transition-all border border-black/10 dark:border-white/10
-                                ${resolution.startsWith(res)
-                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
-                                  : 'bg-transparent text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                            >
-                              {res}
-                            </button>
-                          ))}
+                              <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
+                                <ul className="space-y-3 pb-2">
+                                  {STYLE_DESCRIPTIONS[activeDetailStyle].keywords.map((kw, idx) => (
+                                    <li key={idx} className="flex items-start">
+                                      <span className="mr-2 mt-1.5 w-1 h-1 rounded-full bg-current shrink-0 opacity-40" />
+                                      <div className="flex flex-col">
+                                        <span className="text-[11px] font-medium leading-tight">{kw.en}</span>
+                                        <span className="text-[11px] opacity-50 leading-tight">({kw.ko})</span>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          ) : <div className="h-full" />}
                         </div>
                       </div>
                     </div>
 
                     <div className="px-4 pb-2 pt-5 shrink-0">
-                      <button
-                        onClick={handleGenerate}
-                        disabled={!sketchMode || !sketchStyle || isGenerating}
-                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
-                      >
-                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
-                          {isGenerating ? <Loader2 size={20} className="animate-spin" /> : 'GENERATE'}
-                        </span>
+                      <button disabled={!sketchMode || !sketchStyle} className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black">
+                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">GENERATE</span>
                       </button>
                     </div>
 
@@ -2459,7 +2366,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                                     prev.includes(num) ? prev.filter(n => n !== num) : [...prev, num]
                                   );
                                 }}
-                                className={`w-full group rounded-full border border-black/10 dark:border-white/10 p-2 transition-all flex items-center gap-3
+                                className={`w-full group rounded-[20px] border border-black/10 dark:border-white/10 p-2 transition-all flex items-center gap-3
                                   ${plannerAgents.includes(num)
                                     ? 'bg-black/5 dark:bg-white/5'
                                     : 'bg-white/40 dark:bg-black/40 hover:bg-black/5 dark:hover:bg-white/5'}`}
@@ -2483,13 +2390,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     {/* Generate Button Row - Exactly 20px gap from the last section */}
                     <div className="px-4 pb-2 pt-5 shrink-0">
                       <button
-                        onClick={handleGenerate}
-                        disabled={isGenerating}
                         className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                       >
-                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
-                          {isGenerating ? <Loader2 size={20} className="animate-spin" /> : 'GENERATE'}
-                        </span>
+                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">GENERATE</span>
                       </button>
                     </div>
 
@@ -2503,106 +2406,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                 </aside>
               </div>
 
-              {/* V217: PRINT Panel */}
-              <div className={`
-                absolute inset-0 transition-all duration-500 ease-in-out
-                ${!isRightPanelOpen
-                  ? 'translate-x-10 opacity-0 pointer-events-none'
-                  : (isFunctionSelectorOpen || selectedFunction !== 'PRINT')
-                    ? 'translate-y-10 opacity-0 pointer-events-none'
-                    : 'translate-0 opacity-100 pointer-events-auto'}
-              `}>
-                <aside className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10">
-                  <div className="flex flex-col h-full">
-                    <div className="flex-1 overflow-hidden px-4 pb-0 pt-4 min-h-0 flex flex-col gap-5">
-
-                      {/* CODE SECTION */}
-                      <div className="shrink-0">
-                        <div className="flex justify-between items-center mb-1.5">
-                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Code</span>
-                          <button
-                            onClick={() => navigator.clipboard.writeText(printPrompt)}
-                            className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
-                          >
-                            <Copy size={14} className="opacity-40" />
-                          </button>
-                        </div>
-                        <textarea
-                          value={printPrompt}
-                          onChange={e => setPrintPrompt(e.target.value)}
-                          placeholder="Tell me your project, and I'll make the best template for you."
-                          className="w-full h-[150px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
-                        />
-                      </div>
-
-                      {/* TEMPLATE SECTION */}
-                      <div className="flex flex-col gap-1.5 text-center">
-                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5 text-left">Template</span>
-                        <div className="flex flex-col gap-2">
-                          {[
-                            'REPORT',
-                            'DRAWING & SPECIFICATION',
-                            'PANEL',
-                            'VIDEO'
-                          ].map(template => (
-                            <button
-                              key={template}
-                              onClick={() => setPrintTemplate(prev => prev === template ? '' : template)}
-                              className={`w-full h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[14px] border border-black/10 dark:border-white/10 transition-all flex items-center justify-center
-                                ${printTemplate === template
-                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
-                                  : 'bg-white/40 dark:bg-black/40 text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
-                            >
-                              {template}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* NUMBER OF PAGES SECTION */}
-                      <div>
-                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-4">Number of Pages</span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => setPrintPages(prev => Math.max(1, prev - 1))}
-                            className="w-[44px] h-[44px] rounded-[12px] border border-black/10 dark:border-white/10 flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                          >
-                            <span className="text-xl font-light">-</span>
-                          </button>
-                          <div className="flex-1 h-[44px] rounded-[12px] border border-black/10 dark:border-white/10 flex items-center justify-center font-mono text-sm bg-white/30 dark:bg-black/30">
-                            {printPages}
-                          </div>
-                          <button
-                            onClick={() => setPrintPages(prev => Math.min(10, prev + 1))}
-                            className="w-[44px] h-[44px] rounded-[12px] border border-black/10 dark:border-white/10 flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-                          >
-                            <span className="text-xl font-light">+</span>
-                          </button>
-                        </div>
-                      </div>
-
-                    </div>
-
-                    <div className="px-4 pb-2 pt-5 shrink-0">
-                      <button
-                        onClick={handleGenerate}
-                        disabled={isGenerating}
-                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
-                      >
-                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
-                          {isGenerating ? <Loader2 size={20} className="animate-spin" /> : 'GENERATE'}
-                        </span>
-                      </button>
-                    </div>
-
-                    <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
-                      <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
-                        © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
-                      </p>
-                    </div>
-                  </div>
-                </aside>
-              </div>
+              {/* V217: PRINT Panel (Placeholder or implementation plan) */}
+              {/* ... existing or future panels ... */}
 
             </div>{/* End Shared Panel Container */}
           </div>{/* End inner flex col */}
