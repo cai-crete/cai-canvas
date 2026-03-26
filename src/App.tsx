@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, Footprints, Plus, PanelLeft } from 'lucide-react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, Footprints, Plus, PanelLeft, Lasso } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 
@@ -208,7 +208,7 @@ export default function App() {
   const clickedItemStartPositionsRef = useRef<Record<string, { x: number, y: number }>>({});
   const pendingToggleItemIdRef = useRef<string | null>(null);
   const isTwoFingerActiveRef = useRef(false); // V198: Block lasso on two-finger touch
-  const previousCanvasModeRef = useRef<'select' | 'pan'>('select'); // V199: Pan persistence
+  const previousCanvasModeRef = useRef<'select' | 'pan' | 'lasso'>('select'); // V199: Pan persistence
   // V157: AbortController for canceling generation
   const abortControllerRef = useRef<AbortController | null>(null);
   // Keep State for render (cursor CSS)
@@ -255,7 +255,7 @@ export default function App() {
   const [canvasZoom, setCanvasZoom] = useState(100);
   const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
   const [focusMode, setFocusMode] = useState<'all' | 'target'>('all');
-  const [canvasMode, setCanvasMode] = useState<'select' | 'pan'>('select');
+  const [canvasMode, setCanvasMode] = useState<'select' | 'pan' | 'lasso'>('select');
 
   // V75: Item-bound Library State
   const [openLibraryItemId, setOpenLibraryItemId] = useState<string | null>(null);
@@ -479,6 +479,9 @@ export default function App() {
     // V184: Auto-collapse expanded search ONLY when NOT clicking UI elements (Canvas or Item clicks)
     if (isSearchExpanded) setIsSearchExpanded(false);
 
+    // V201-2: Stylus (pen) unblock - reset two-finger flag on pen input
+    if (e.pointerType === 'pen') isTwoFingerActiveRef.current = false;
+
     const coords = getCanvasCoords(e.clientX, e.clientY);
 
     if (canvasMode === 'pan') {
@@ -556,17 +559,26 @@ export default function App() {
       return;
     }
 
-    // 3. No Item Clicked -> Start Lasso + Close Artboard
+    // 3. No Item Clicked
     // V198: Block lasso if two-finger touch is active
     if (isTwoFingerActiveRef.current) return;
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
     setOpenLibraryItemId(null);
-    
-    setIsLassoing(true);
-    isLassoingRef.current = true;
-    setLassoPath([{ x: coords.x, y: coords.y }]);
-    e.currentTarget.setPointerCapture(e.pointerId);
+
+    if (canvasMode === 'lasso') {
+      // V201-1: Lasso mode only
+      setIsLassoing(true);
+      isLassoingRef.current = true;
+      setLassoPath([{ x: coords.x, y: coords.y }]);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } else {
+      // V201-1: Select mode background click → pan
+      isDraggingPanRef.current = true;
+      setIsDraggingPan(true);
+      dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -1486,13 +1498,27 @@ ${layerC_property}
                 boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
               }}
             >
-              {/* 1. 도구 모드 (Toggle: Select / Pan) */}
-              <button 
-                onClick={() => setCanvasMode(canvasMode === 'select' ? 'pan' : 'select')}
-                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all bg-black text-white dark:bg-white dark:text-black hover:cursor-pointer`}
-                title={canvasMode === 'select' ? 'Switch to Pan Mode' : 'Switch to Select Mode'}
+              {/* 1. 도구 모드 버튼: Cursor / Pan / Lasso (V201) */}
+              <button
+                onClick={() => setCanvasMode('select')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'select' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Cursor (Select)"
               >
-                {canvasMode === 'select' ? <MousePointer2 size={18} /> : <Hand size={18} />}
+                <MousePointer2 size={18} />
+              </button>
+              <button
+                onClick={() => setCanvasMode('pan')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'pan' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Pan"
+              >
+                <Hand size={18} />
+              </button>
+              <button
+                onClick={() => setCanvasMode('lasso')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'lasso' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Lasso Select"
+              >
+                <Lasso size={18} />
               </button>
 
               <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
@@ -1583,21 +1609,24 @@ ${layerC_property}
               transformOrigin: 'center'
             }}
           >
-            {/* V195/V198: Connection Lines (Background Layer - fixed SVG coordinates) */}
+            {/* V201-3: Connection Lines - full-size SVG for cross-browser rendering */}
             <svg
-              className="absolute pointer-events-none overflow-visible"
-              style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, zIndex: 30, pointerEvents: 'none', overflow: 'visible' }}
+              className="absolute pointer-events-none"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 9, pointerEvents: 'none', overflow: 'visible' }}
             >
               {canvasItems.map((item) => {
                 if (!item.motherId) return null;
                 const mother = canvasItems.find(i => i.id === item.motherId);
                 if (!mother) return null;
-                
-                // V198: Use numeric coordinates (SVG does not support CSS calc())
-                const x1 = mother.x + mother.width;
-                const y1 = mother.y + mother.height / 2;
-                const x2 = item.x;
-                const y2 = item.y + item.height / 2;
+
+                // V201-3: Compute absolute SVG coordinates using window center + canvasOffset + scale
+                const scale = canvasZoom / 100;
+                const cx = window.innerWidth / 2 + canvasOffset.x;
+                const cy = window.innerHeight / 2 + canvasOffset.y;
+                const x1 = cx + (mother.x + mother.width) * scale;
+                const y1 = cy + (mother.y + mother.height / 2) * scale;
+                const x2 = cx + item.x * scale;
+                const y2 = cy + (item.y + item.height / 2) * scale;
 
                 return (
                   <line
@@ -1608,7 +1637,6 @@ ${layerC_property}
                     y2={y2}
                     stroke="rgba(0, 0, 0, 0.6)"
                     strokeWidth="1"
-                    vectorEffect="non-scaling-stroke"
                     style={{ pointerEvents: 'none' }}
                   />
                 );
