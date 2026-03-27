@@ -233,9 +233,8 @@ const SitePlanDiagram = ({ angle, isAnalyzing, analysisStep }: { angle: string, 
 
 interface CanvasItem {
   id: string;
-  type: 'upload' | 'generated' | 'artboard' | 'sketch_generated' | 'path' | 'text';
-  src: string | null;
-  isLocked?: boolean;
+  type: 'upload' | 'generated' | 'path' | 'text';
+  src: string;
   x: number;
   y: number;
   width: number;
@@ -284,10 +283,6 @@ export default function App() {
   const isCreatingTextRef = useRef(false); // V2.4: Atomic lock for text box
   const isErasingRef = useRef(false); // V254: Atomic lock for erasing
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 }); // V2.3: Tracking for previews
-  // V255: Stroke width & eraser size
-  const [penStrokeWidth, setPenStrokeWidth] = useState(2);
-  const [eraserStrokeWidth, setEraserStrokeWidth] = useState(8);
-  const [showStrokePanel, setShowStrokePanel] = useState<'pen' | 'eraser' | null>(null);
 
   // Drag & Resize Refs (Ref 기반 — stale closure 방지)
   const isDraggingItemRef = useRef(false);
@@ -412,21 +407,12 @@ export default function App() {
   const lastTouchDist = useRef<number | null>(null);
   const lastTouchCenter = useRef<{ x: number, y: number } | null>(null);
 
-  const artboardFileInputRef = useRef<HTMLInputElement>(null); // V257: artboard image upload
-  const pendingArtboardIdRef = useRef<string | null>(null); // V257: target artboard for upload
-  const activeDrawBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null); // V257: C-10 drawing bounds
-  const activeDrawTargetIdRef = useRef<string | null>(null); // V258: artboard/item ID for motherId linkage
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLElement>(null); // V54: Absolute ref for canvas section
   const canvasOffsetRef = useRef({ x: 0, y: 0 });
   const canvasZoomRef = useRef(100);
   useEffect(() => { canvasOffsetRef.current = canvasOffset; }, [canvasOffset]);
   useEffect(() => { canvasZoomRef.current = canvasZoom; }, [canvasZoom]);
-  // V255: Close stroke panel when switching away from pen/eraser
-  useEffect(() => {
-    if (canvasMode !== 'pen' && canvasMode !== 'eraser') {
-      setShowStrokePanel(null);
-    }
-  }, [canvasMode]);
 
   // V74: Responsive Scale State
   const [appScale, setAppScale] = useState(1);
@@ -597,38 +583,8 @@ export default function App() {
     setCanvasZoom(prev => Math.min(Math.max(prev + zoomFactor, 10), 200));
   };
 
-  // V254: Partial erase helpers (V256: segment-circle intersection for precise erasure)
-
-  // V256: Returns [t1, t2] where segment P1→P2 intersects circle (c, r), or null if no intersection
-  const segmentCircleIntersect = (
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    c: { x: number; y: number },
-    r: number
-  ): [number, number] | null => {
-    const dx = p2.x - p1.x, dy = p2.y - p1.y;
-    const fx = p1.x - c.x, fy = p1.y - c.y;
-    const a = dx * dx + dy * dy;
-    if (a === 0) return null;
-    const b = 2 * (fx * dx + fy * dy);
-    const cv = fx * fx + fy * fy - r * r;
-    const disc = b * b - 4 * a * cv;
-    if (disc < 0) return null;
-    const sq = Math.sqrt(disc);
-    const t1 = (-b - sq) / (2 * a);
-    const t2 = (-b + sq) / (2 * a);
-    if (t2 < 0 || t1 > 1) return null;
-    return [Math.max(0, t1), Math.min(1, t2)];
-  };
-
-  const lerpPt = (
-    p1: { x: number; y: number },
-    p2: { x: number; y: number },
-    t: number
-  ): { x: number; y: number } => ({
-    x: p1.x + (p2.x - p1.x) * t,
-    y: p1.y + (p2.y - p1.y) * t,
-  });
+  // V254: Partial erase helpers
+  const ERASER_RADIUS = 10; // canvas coordinate units
 
   const createPathItemFromAbsolutePoints = (
     absolutePoints: { x: number; y: number }[],
@@ -652,76 +608,38 @@ export default function App() {
     };
   };
 
-  // V256: Precise erase using segment-circle intersection clipping
   const eraseAtPoint = (coords: { x: number; y: number }) => {
     setCanvasItems(prev => {
-      const r = eraserStrokeWidth;
-      let globalChanged = false;
       const newItems: CanvasItem[] = [];
-
+      let changed = false;
       for (const item of prev) {
-        if (item.type !== 'path') { newItems.push(item); continue; }
-
-        const pts = (item.parameters?.points || []).map((p: { x: number; y: number }) => ({
-          x: item.x + p.x, y: item.y + p.y,
-        }));
-        if (pts.length < 2) continue;
-
-        const inside = (p: { x: number; y: number }) =>
-          (p.x - coords.x) ** 2 + (p.y - coords.y) ** 2 <= r * r;
-
-        const outSegs: { x: number; y: number }[][] = [];
-        let seg: { x: number; y: number }[] = [];
-        let pathChanged = false;
-
-        if (!inside(pts[0])) {
-          seg.push(pts[0]);
-        } else {
-          pathChanged = true;
-        }
-
-        for (let i = 1; i < pts.length; i++) {
-          const p0 = pts[i - 1], p1 = pts[i];
-          const p0in = inside(p0), p1in = inside(p1);
-          const its = segmentCircleIntersect(p0, p1, coords, r);
-
-          if (!p0in && !p1in) {
-            if (its) {
-              // 선분이 원을 통과: 진입점까지 저장 → 새 세그먼트를 탈출점부터 시작
-              pathChanged = true;
-              seg.push(lerpPt(p0, p1, its[0]));
-              if (seg.length >= 2) outSegs.push(seg);
-              seg = [lerpPt(p0, p1, its[1]), p1];
-            } else {
-              seg.push(p1);
-            }
-          } else if (!p0in && p1in) {
-            // 원 진입: 진입점에서 세그먼트 종료
-            pathChanged = true;
-            if (its) seg.push(lerpPt(p0, p1, its[0]));
-            if (seg.length >= 2) outSegs.push(seg);
-            seg = [];
-          } else if (p0in && !p1in) {
-            // 원 탈출: 탈출점부터 새 세그먼트 시작
-            pathChanged = true;
-            if (its) seg.push(lerpPt(p0, p1, its[1]));
-            seg.push(p1);
-          }
-          // p0in && p1in: 둘 다 원 안 → skip
-        }
-        if (seg.length >= 2) outSegs.push(seg);
-
-        if (!pathChanged) {
+        if (item.type !== 'path') {
           newItems.push(item);
-        } else {
-          globalChanged = true;
-          for (const s of outSegs) {
-            if (s.length >= 2) newItems.push(createPathItemFromAbsolutePoints(s, item));
+          continue;
+        }
+        const points: { x: number; y: number }[] = item.parameters?.points || [];
+        const keepFlags = points.map(p => {
+          const ax = item.x + p.x;
+          const ay = item.y + p.y;
+          return Math.sqrt((ax - coords.x) ** 2 + (ay - coords.y) ** 2) > ERASER_RADIUS;
+        });
+        if (keepFlags.every(k => k)) {
+          newItems.push(item);
+          continue;
+        }
+        changed = true;
+        let segment: { x: number; y: number }[] = [];
+        for (let i = 0; i < points.length; i++) {
+          if (keepFlags[i]) {
+            segment.push({ x: item.x + points[i].x, y: item.y + points[i].y });
+          } else {
+            if (segment.length >= 2) newItems.push(createPathItemFromAbsolutePoints(segment, item));
+            segment = [];
           }
         }
+        if (segment.length >= 2) newItems.push(createPathItemFromAbsolutePoints(segment, item));
       }
-
-      return globalChanged ? newItems : prev;
+      return changed ? newItems : prev;
     });
   };
 
@@ -761,7 +679,6 @@ export default function App() {
 
     // V184: Auto-collapse expanded search ONLY when NOT clicking UI elements (Canvas or Item clicks)
     if (isSearchExpanded) setIsSearchExpanded(false);
-    setShowStrokePanel(null); // V255: Close stroke width panel on canvas click
 
     // V201-2: Stylus (pen) unblock - reset two-finger flag on pen input
     if (e.pointerType === 'pen') isTwoFingerActiveRef.current = false;
@@ -786,7 +703,7 @@ export default function App() {
       if (resizeCorner && selectedItemIds.length === 1) {
         const selectedId = selectedItemIds[0];
         const item = canvasItems.find(i => i.id === selectedId);
-        if (item && !(item.type === 'artboard' && item.isLocked)) { // V258: locked artboard cannot be resized
+        if (item) {
           setHistoryStates(prev => [...prev, canvasItems]);
           setRedoStates([]);
 
@@ -802,7 +719,6 @@ export default function App() {
       // 2. Check Item Click for Selection/Drag (V254: path excluded — B-3)
       const clickedItem = [...canvasItems].reverse().find((item: CanvasItem) => {
         if (item.type === 'path') return false;
-        if (item.type === 'artboard' && item.isLocked) return false; // V258: locked artboard cannot be dragged
         return coords.x >= item.x && coords.x <= item.x + item.width &&
                coords.y >= item.y && coords.y <= item.y + item.height;
       });
@@ -836,22 +752,11 @@ export default function App() {
           pendingToggleItemIdRef.current = clickedItem.id;
         }
 
-        // V258 C-6: Also collect start positions of motherId-linked children
-        const startPositions: Record<string, { x: number; y: number }> = {};
-        for (const id of currentSelection) {
-          const itm = canvasItems.find((i: CanvasItem) => i.id === id);
-          if (itm) {
-            startPositions[id] = { x: itm.x, y: itm.y };
-            if (itm.type === 'artboard' || itm.type === 'upload' || itm.type === 'generated') {
-              canvasItems.forEach((child: CanvasItem) => {
-                if (child.motherId === id && (child.type === 'path' || child.type === 'text')) {
-                  startPositions[child.id] = { x: child.x, y: child.y };
-                }
-              });
-            }
-          }
-        }
-        clickedItemStartPositionsRef.current = startPositions;
+        clickedItemStartPositionsRef.current = currentSelection.reduce((acc, id) => {
+          const itm = canvasItems.find(i => i.id === id);
+          if (itm) acc[id] = { x: itm.x, y: itm.y };
+          return acc;
+        }, {} as Record<string, { x: number, y: number }>);
 
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
@@ -872,15 +777,6 @@ export default function App() {
       setLassoPath([{ x: coords.x, y: coords.y }]);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'pen') {
-      // V257 C-10: Block drawing outside drawable item bounds
-      const drawTarget = canvasItems.find((item: CanvasItem) =>
-        (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
-        coords.x >= item.x && coords.x <= item.x + item.width &&
-        coords.y >= item.y && coords.y <= item.y + item.height
-      );
-      if (!drawTarget) return;
-      activeDrawBoundsRef.current = { x: drawTarget.x, y: drawTarget.y, width: drawTarget.width, height: drawTarget.height };
-      activeDrawTargetIdRef.current = drawTarget.id; // V258: save target for motherId
       setHistoryStates(prev => [...prev, canvasItems]);
       setRedoStates([]);
       setIsDrawing(true);
@@ -889,28 +785,12 @@ export default function App() {
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'eraser') {
       // V254: drag-based partial erase for paths (Q1: only paths, images/text ignored)
-      // V257 C-10: Block erasing outside drawable item bounds
-      const eraseTarget = canvasItems.find((item: CanvasItem) =>
-        (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
-        coords.x >= item.x && coords.x <= item.x + item.width &&
-        coords.y >= item.y && coords.y <= item.y + item.height
-      );
-      if (!eraseTarget) return;
-      activeDrawBoundsRef.current = { x: eraseTarget.x, y: eraseTarget.y, width: eraseTarget.width, height: eraseTarget.height };
       setHistoryStates(prev => [...prev, canvasItems]);
       setRedoStates([]);
       isErasingRef.current = true;
       eraseAtPoint(coords);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'text') {
-      // V258 C-4: Restrict text to drawable item bounds
-      const textTarget = canvasItems.find((item: CanvasItem) =>
-        (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
-        coords.x >= item.x && coords.x <= item.x + item.width &&
-        coords.y >= item.y && coords.y <= item.y + item.height
-      );
-      if (!textTarget) return;
-      activeDrawTargetIdRef.current = textTarget.id; // V258: save target for motherId
       setIsCreatingText(true);
       isCreatingTextRef.current = true; // V2.4: Set atomic lock
       setTextStartPos(coords);
@@ -933,13 +813,7 @@ export default function App() {
     } else if (isLassoingRef.current) {
       setLassoPath(prev => [...prev, coords]);
     } else if (isDrawing) {
-      // V257 C-10: Clip points to drawable bounds
-      const b = activeDrawBoundsRef.current;
-      const clipped = b ? {
-        x: Math.max(b.x, Math.min(b.x + b.width, coords.x)),
-        y: Math.max(b.y, Math.min(b.y + b.height, coords.y)),
-      } : coords;
-      setCurrentStroke(prev => [...prev, clipped]);
+      setCurrentStroke(prev => [...prev, coords]);
     } else if (isCreatingText) {
       // Logic handled in UI via textStartPos and current coords
     } else if (isDraggingPanRef.current) {
@@ -948,6 +822,7 @@ export default function App() {
         y: e.clientY - dragStartRef.current.y
       });
     } else if (isDraggingItemRef.current && selectedItemIdsRef.current.length > 0) {
+      const currentIds = selectedItemIdsRef.current;
       const dx = coords.x - dragStartRef.current.x;
       const dy = coords.y - dragStartRef.current.y;
 
@@ -957,10 +832,9 @@ export default function App() {
       }
 
       setCanvasItems(prev => prev.map(item => {
+        if (!currentIds.includes(item.id)) return item;
         const startPos = clickedItemStartPositionsRef.current[item.id];
-        if (!startPos) return item;
-        // V258 C-6: Move selected items + motherId-linked children (path/text)
-        return { ...item, x: startPos.x + dx, y: startPos.y + dy };
+        return startPos ? { ...item, x: startPos.x + dx, y: startPos.y + dy } : item;
       }));
     } else if (isResizingItemRef.current && selectedItemIdsRef.current.length === 1) {
       const selectedId = selectedItemIdsRef.current[0];
@@ -1039,14 +913,14 @@ export default function App() {
           id: `path-${Date.now()}`,
           type: 'path',
           src: '',
-          x: minX, y: minY,
-          width: Math.max(maxX - minX, 2),
+          x: minX, y: minY, 
+          width: Math.max(maxX - minX, 2), 
           height: Math.max(maxY - minY, 2),
-          motherId: activeDrawTargetIdRef.current, // V258: link to parent item
+          motherId: null,
           parameters: {
             points: relativePoints,
             strokeColor: theme === 'dark' ? '#FFFFFF' : '#000000',
-            strokeWidth: penStrokeWidth,
+            strokeWidth: 2,
             angleIndex: 0, altitudeIndex: 0, lensIndex: 0, timeIndex: 0
           }
         };
@@ -1063,23 +937,15 @@ export default function App() {
       if (width > 10 && height > 10) {
         setHistoryStates(prev => [...prev, canvasItems]);
         setRedoStates([]);
-        // V258 C-5: Clip text box to parent item bounds
-        const textParent = canvasItems.find((i: CanvasItem) => i.id === activeDrawTargetIdRef.current);
-        const rawX = Math.min(coords.x, textStartPos.x);
-        const rawY = Math.min(coords.y, textStartPos.y);
-        const clampedX = textParent ? Math.max(textParent.x, rawX) : rawX;
-        const clampedY = textParent ? Math.max(textParent.y, rawY) : rawY;
-        const clampedW = textParent ? Math.min(width, textParent.x + textParent.width - clampedX) : width;
-        const clampedH = textParent ? Math.min(height, textParent.y + textParent.height - clampedY) : height;
         const newItem: CanvasItem = {
           id: `text-${Date.now()}`,
           type: 'text',
           src: '',
-          x: clampedX,
-          y: clampedY,
-          width: clampedW,
-          height: clampedH,
-          motherId: activeDrawTargetIdRef.current, // V258: link to parent item
+          x: Math.min(coords.x, textStartPos.x),
+          y: Math.min(coords.y, textStartPos.y),
+          width: width,
+          height: height,
+          motherId: null,
           parameters: {
             content: "", // V2.4: Start with empty content
             fontSize: 14,
@@ -1103,8 +969,6 @@ export default function App() {
     }
 
     isErasingRef.current = false;
-    activeDrawBoundsRef.current = null; // V257 C-10: clear draw bounds
-    activeDrawTargetIdRef.current = null; // V258 C-5: clear target id
     isDraggingPanRef.current = false;
     isDraggingItemRef.current = false;
     isResizingItemRef.current = false;
@@ -1144,7 +1008,7 @@ export default function App() {
 
       // 1. Pinch Zoom
       const dist = (Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY) - (lastTouchDist.current || 0)) * 0.5;
-      setCanvasZoom(prev => Math.min(Math.max(prev + dist, 10), 200));
+      setCanvasZoom(prev => Math.min(Math.max(prev + dist, 10), 150));
       lastTouchDist.current = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
 
       // 2. Two-Finger Pan (Absolute screen coordinates for smoothness)
@@ -1173,29 +1037,95 @@ export default function App() {
     setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
   };
 
-  // V257: Artboard image upload — replaces src of target artboard, fits width=595
-  const handleArtboardImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const artboardId = pendingArtboardIdRef.current;
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!artboardId || !file) return;
-    e.target.value = '';
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64Image = reader.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const newHeight = Math.round(img.height * (960 / img.width));
-        setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
-          i.id === artboardId ? { ...i, src: base64Image, height: newHeight } : i
-        ));
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64Image = reader.result as string;
+
+
+
+        // V128: Step 1 — Load original image to get dimensions, then show it immediately on canvas
+        const img = new Image();
+        img.onload = async () => {
+          const newItemId = `item-${Date.now()}`;
+          // V139: Mother image scales to 50%
+          const scaledWidth = img.width * 0.5;
+          const scaledHeight = img.height * 0.5;
+
+          let newY = -scaledHeight / 2;
+          let newX = -scaledWidth / 2;
+
+          if (canvasItems.length > 0) {
+            const leftMostItem = canvasItems.reduce((prev, current) =>
+              (prev.x < current.x) ? prev : current
+            );
+            const bottomMostItem = canvasItems.reduce((prev, current) =>
+              (prev.y + prev.height > current.y + current.height) ? prev : current
+            );
+            newX = leftMostItem.x;
+            newY = bottomMostItem.y + bottomMostItem.height + 40;
+          }
+
+          const newItem: CanvasItem = {
+            id: newItemId,
+            type: 'upload',
+            src: base64Image, // Show original immediately
+            x: newX,
+            y: newY,
+            width: scaledWidth,
+            height: scaledHeight,
+            motherId: newItemId,
+            parameters: null
+          };
+
+          setHistoryStates(prevH => [...prevH, canvasItems]);
+          setCanvasItems(prev => [...prev, newItem]);
+          setSelectedItemIds([]); // V195: Initial state deactivated
+          setActiveTab('create');
+          setIsAnalyzing(true);
+          setAnalysisStep('배경 이미지 최적화 중...'); // V155: Step — Background Regen
+
+          // V128: Step 2 — Background regeneration, then replace src of existing item
+          let finalBase64 = base64Image;
+          try {
+            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+            const response = await ai.models.generateContent({
+              model: IMAGE_GEN,
+              contents: {
+                parts: [
+                  { inlineData: { data: base64Image.split(',')[1], mimeType: base64Image.split(';')[0].split(':')[1] } },
+                  { text: "Recreate and enhance this architectural image exactly as it is without altering its geometry or perspective." }
+                ]
+              }
+            });
+
+            if (response.candidates && response.candidates[0]?.content?.parts) {
+              for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                  finalBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                  console.log("[V128] Image regenerated. Replacing canvas item src:", newItemId);
+                  // V128: Step 3 — Replace original with regenerated image in-place
+                  setCanvasItems(prev => prev.map(item =>
+                    item.id === newItemId ? { ...item, src: finalBase64 } : item
+                  ));
+                  break;
+                }
+              }
+            }
+          } catch (error) {
+            console.error("[V128] Regeneration failed, keeping original:", error);
+          }
+
+          // V124/V128: Auto-trigger Phase 2 Analysis after regeneration
+          analyzeViewpoint(finalBase64, newItemId);
+        };
+        img.src = base64Image;
       };
-      img.src = base64Image;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    }
   };
-
-
-  // V257: handleImageUpload removed — upload now handled by artboard [Upload] button (handleArtboardImageUpload)
 
   const analyzeViewpoint = async (base64Image: string, itemId?: string) => {
     setIsAnalyzing(true);
@@ -1278,7 +1208,7 @@ export default function App() {
           setCanvasItems(prev => prev.filter(item => item.id !== itemId));
           setIsAnalyzing(false);
           setIsGenerating(false);
-          return null;
+          return false;
         }
         console.log('[PROTOCOL-PASS] Phase 2 검증 통과: BIM 앙상블 페어 동결 완료');
         // --------------------------------------------------------
@@ -1308,28 +1238,22 @@ export default function App() {
           item.id === itemId ? { ...item, parameters: newParams } : item
         ));
 
-        // After parameter analysis, trigger elevation generation with extracted params
-        const elImages = await generateElevations(base64Image, data.elevation_parameters, itemId);
-        return { elevationParameters: data.elevation_parameters, analyzedOpt, elevationImages: elImages }; // V257
+        // After parameter analysis, trigger individual elevation generation with extracted params
+        await generateElevations(base64Image, data.elevation_parameters, itemId);
+        return true;
       };
 
-      let analysisResult: { elevationParameters: any; analyzedOpt: any; elevationImages: any } | null = null;
       try {
-        const r = await runAnalysis(ANALYSIS);
-        if (r !== null) analysisResult = r;
+        await runAnalysis(ANALYSIS);
       } catch (primaryError) {
         console.warn(`Primary model (${ANALYSIS}) failed, retrying with fallback...`, primaryError);
-        const r2 = await runAnalysis(ANALYSIS_FALLBACK);
-        if (!r2) throw new Error("Fallback failed");
-        if (r2 !== null) analysisResult = r2;
+        const success = await runAnalysis(ANALYSIS_FALLBACK);
+        if (!success) throw new Error("Fallback failed");
       }
-
-      return analysisResult; // V257: return params for handleGenerate
 
     } catch (err) {
       console.warn("Analysis failed completely, using defaults", err);
       alert("분석 API 호출이 실패하거나 할당량(Quota)을 초과했습니다. 기본값으로 세팅됩니다.");
-      return null;
     } finally {
       setIsAnalyzing(false);
       setAnalysisStep(''); // V155: 메시지 초기화
@@ -1426,40 +1350,10 @@ export default function App() {
         }));
       }
 
-      return newImages; // V257: return for handleGenerate inline use
-
     } catch (err) {
       console.warn("Elevation generation failed", err);
-      return null;
     } finally {
       setAnalysisStep('');
-    }
-  };
-
-  // --- V2.6.0: Local Server Image Save Helper ---
-  const saveImageToLocal = async (base64Data: string, type: 'sketch' | 'print' | 'viewpoint') => {
-    try {
-      const folderMap = {
-        sketch: 'cai-sketch',
-        print: 'cai-print',
-        viewpoint: 'cai-sketch' // Standardized as per instructions
-      };
-      
-      const response = await fetch('/api/save-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          images: [base64Data],
-          folderName: folderMap[type]
-        })
-      });
-      
-      const result = await response.json();
-      console.log(`[V2.6.0] Save to ${folderMap[type]} result:`, result);
-      return result;
-    } catch (err) {
-      console.error('[V2.6.0] Failed to save image locally:', err);
-      return null;
     }
   };
 
@@ -1469,13 +1363,12 @@ export default function App() {
   const handleGenerate = async () => {
     // 0. FUNCTION MULTIPLEXER
     if (selectedFunction === 'CHANGE VIEWPOINT') {
-      // V257: Accept artboard/upload/generated as source
       const sourceItem = selectedItemIds[0]
         ? canvasItems.find(item => item.id === selectedItemIds[0])
-        : canvasItems.find(item => item.type === 'artboard' || item.type === 'upload');
+        : (canvasItems.length > 0 ? canvasItems[0] : null);
 
-      if (!sourceItem || !sourceItem.src) {
-        alert("아트보드에 이미지를 먼저 업로드하세요.");
+      if (!sourceItem) {
+        alert("Please upload at least one image first.");
         return;
       }
 
@@ -1487,8 +1380,17 @@ export default function App() {
       }
       console.log('[PROTOCOL-PASS] Phase 3 검증 통과: 5-IVSP 파라미터 셋업 유효함');
 
+      // --- V153: PHASE 4 Pre-flight 검증 (Integration Validation) ---
+      const hasEnsemblePair = sourceItem.src && elevationParams && Object.keys(elevationParams).length > 0;
+      if (!hasEnsemblePair) {
+        console.error('[PROTOCOL-FAIL] Phase 4 (Pre-flight) 검증 실패: ensemble_pair 불일치. 재질/속성 파라미터가 누락되었습니다.');
+        alert('건축 파라미터 속성이 누락되어 렌더링을 차단합니다. 다시 생성 버튼을 눌러주세요.');
+        return;
+      }
+      console.log('[PROTOCOL-PASS] Phase 4 (Pre-flight) 검증 통과: 양손역부족 통과, ensemble_pair 무결성 확인');
+
       const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === sourceItem.id || (i.motherId === undefined && i.id === sourceItem.id)));
-      const isFirstTime = (sourceItem.type === 'upload' || sourceItem.type === 'artboard') && !hasInitialViews;
+      const isFirstTime = sourceItem.type === 'upload' && !hasInitialViews;
 
       setIsGenerating(true);
       const controller = new AbortController();
@@ -1496,29 +1398,10 @@ export default function App() {
 
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-        // V257: C-7~C-9 — inline V128 regen if first time (no elevationParams on item)
-        let localElevationParams: any = sourceItem.parameters?.elevationParams || elevationParams;
-        let localElevationImages: any = sourceItem.parameters?.elevationImages || elevationImages;
-        let localAnalyzedOpt: any = sourceItem.parameters?.analyzedOpticalParams || analyzedOpticalParams;
-
-        if (!localElevationParams) {
-          console.log('[V257] No elevationParams found — running V128 regen pipeline...');
-          const activeSrc = sourceItem.src as string;
-          const analysisResult = await analyzeViewpoint(activeSrc, sourceItem.id);
-          if (!analysisResult) {
-            setIsGenerating(false);
-            return;
-          }
-          localElevationParams = analysisResult.elevationParameters;
-          localElevationImages = analysisResult.elevationImages;
-          localAnalyzedOpt = analysisResult.analyzedOpt;
-        }
-
-        const v0_angle = localAnalyzedOpt?.angle || 'Unknown';
-        const v0_altitude = localAnalyzedOpt?.altitude || 'Unknown';
-        const v0_lens = localAnalyzedOpt?.lens || 'Unknown';
-        const v0_time = localAnalyzedOpt?.time || 'Unknown';
+        const v0_angle = analyzedOpticalParams?.angle || 'Unknown';
+        const v0_altitude = analyzedOpticalParams?.altitude || 'Unknown';
+        const v0_lens = analyzedOpticalParams?.lens || 'Unknown';
+        const v0_time = analyzedOpticalParams?.time || 'Unknown';
 
         const getAngle = (base: string) => {
           if (['07:30', '09:00', '10:30'].includes(base)) return '07:30';
@@ -1553,8 +1436,8 @@ export default function App() {
           if (motherItem) actualImageSrc = motherItem.src;
         }
 
-        const base64Data = (actualImageSrc as string).split(',')[1];
-        const mimeType = (actualImageSrc as string).split(';')[0].split(':')[1];
+        const base64Data = actualImageSrc.split(',')[1];
+        const mimeType = actualImageSrc.split(';')[0].split(':')[1];
 
         const generatePromises = viewsToGenerate.map(async (viewConfig) => {
           const currentTime = TIMES[timeIndex];
@@ -1568,12 +1451,12 @@ export default function App() {
 ## Step 2: Scenario Mapping & Optical Engineering
 - Scenario: ${viewConfig.scenario} | Lens: ${viewConfig.lens} | Time of Day: ${currentTime}`;
 
-          const layerC_property = localElevationParams ? `
+          const layerC_property = elevationParams ? `
 ## Step 5: Structural & Material Parameters (PHASE 2 AEPL Data — Immutable)
-- Mass Typology: ${localElevationParams['1_macro_geometry']?.mass_typology || 'N/A'}
-- Roof Form: ${localElevationParams['1_macro_geometry']?.roof_form || 'N/A'}
-- Base Material: ${localElevationParams['3_material']?.base_material_type || 'N/A'}
-- Fenestration: ${localElevationParams['4_fenestration']?.fenestration_type || 'N/A'}` : '';
+- Mass Typology: ${elevationParams['1_macro_geometry']?.mass_typology || 'N/A'}
+- Roof Form: ${elevationParams['1_macro_geometry']?.roof_form || 'N/A'}
+- Base Material: ${elevationParams['3_material']?.base_material_type || 'N/A'}
+- Fenestration: ${elevationParams['4_fenestration']?.fenestration_type || 'N/A'}` : '';
 
           const layerC_blindspot = `## Step 3: Layering & Blind Spot Inference (Void Mitigation)
 - Context Void Mitigation: Synchronize Foreground/Background.
@@ -1593,9 +1476,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
 
           const runGen = async (modelName: string) => {
             const parts: any[] = [{ inlineData: { data: base64Data, mimeType: mimeType } }];
-            if (localElevationImages) {
+            if (elevationImages) {
               for (const slot of activeElevationSlots) {
-                const imgData = (localElevationImages as any)[slot.label.toLowerCase()];
+                const imgData = (elevationImages as any)[slot.label.toLowerCase()];
                 if (imgData) parts.push({ inlineData: { data: imgData.split(',')[1], mimeType: 'image/png' } });
               }
             }
@@ -1621,13 +1504,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         parameters: {
                           angleIndex, altitudeIndex, lensIndex, timeIndex,
                           analyzedOpticalParams: updatedOpticalParams,
-                          elevationParams: localElevationParams, sitePlanImage, elevationImages: localElevationImages
+                          elevationParams, sitePlanImage, elevationImages
                         }
                       };
-                      
-                      // V2.6.0: Save to local folder
-                      saveImageToLocal(generatedSrc, 'viewpoint');
-                      
                       setCanvasItems(prev => {
                         setHistoryStates(prevH => [...prevH, prev]);
                         const siblings = prev.filter(i => i.type === 'generated' && (i.motherId === sourceItem.id || i.motherId === sourceItem.motherId));
@@ -1711,77 +1590,15 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
           Please generate the image now adhering to the Blueprint Protocol.
         `.trim();
 
-        // V258 C-8: Build composite image once (outside runGen to avoid duplicate on fallback)
-        const sourceItem = selectedItemIds[0] ? canvasItems.find((item: CanvasItem) => item.id === selectedItemIds[0]) : null;
-
-        const createArtboardComposite = (artboard: CanvasItem): Promise<string | null> =>
-          new Promise((resolve) => {
-            const canvas = document.createElement('canvas');
-            canvas.width = artboard.width;
-            canvas.height = artboard.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { resolve(null); return; }
-
-            ctx.fillStyle = 'rgba(248, 244, 232, 1)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            const drawOverlays = () => {
-              // Paths with motherId === artboard.id
-              canvasItems.filter((i: CanvasItem) => i.type === 'path' && i.motherId === artboard.id).forEach((pathItem: CanvasItem) => {
-                const pts: { x: number; y: number }[] = pathItem.parameters?.points || [];
-                if (pts.length < 2) return;
-                ctx.beginPath();
-                ctx.strokeStyle = pathItem.parameters?.strokeColor || '#000000';
-                ctx.lineWidth = pathItem.parameters?.strokeWidth || 2;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                const ox = pathItem.x - artboard.x;
-                const oy = pathItem.y - artboard.y;
-                ctx.moveTo(ox + pts[0].x, oy + pts[0].y);
-                for (let k = 1; k < pts.length; k++) ctx.lineTo(ox + pts[k].x, oy + pts[k].y);
-                ctx.stroke();
-              });
-              // Text items with motherId === artboard.id
-              canvasItems.filter((i: CanvasItem) => i.type === 'text' && i.motherId === artboard.id).forEach((textItem: CanvasItem) => {
-                const content: string = textItem.parameters?.content || '';
-                const fontSize: number = textItem.parameters?.fontSize || 14;
-                const color: string = textItem.parameters?.color || '#000000';
-                ctx.font = `${fontSize}px sans-serif`;
-                ctx.fillStyle = color;
-                const tx = textItem.x - artboard.x + 8;
-                const ty = textItem.y - artboard.y;
-                content.split('\n').forEach((line: string, li: number) => {
-                  ctx.fillText(line, tx, ty + fontSize * 1.4 * (li + 1));
-                });
-              });
-              resolve(canvas.toDataURL('image/png'));
-            };
-
-            if (artboard.src) {
-              const img = new Image();
-              img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); drawOverlays(); };
-              img.onerror = () => drawOverlays();
-              img.src = artboard.src;
-            } else {
-              drawOverlays();
-            }
-          });
-
-        let compositeData: string | null = null;
-        if (sourceItem?.type === 'artboard') {
-          compositeData = await createArtboardComposite(sourceItem);
-        } else if (sourceItem?.src) {
-          compositeData = sourceItem.src;
-        }
-
         const runGen = async (modelName: string) => {
           const parts: any[] = [{ text: systemPrompt }, { text: finalPrompt }];
-
-          if (compositeData) {
-            parts.unshift({ inlineData: {
-              data: compositeData.split(',')[1],
-              mimeType: compositeData.split(';')[0].split(':')[1]
-            }});
+          
+          // If we have a selected image, we can use it as a reference (sketch)
+          const sourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : null;
+          if (sourceItem) {
+            const base64Data = sourceItem.src.split(',')[1];
+            const mimeType = sourceItem.src.split(';')[0].split(':')[1];
+            parts.unshift({ inlineData: { data: base64Data, mimeType: mimeType } });
           }
 
           const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
@@ -1796,7 +1613,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                   img.onload = () => {
                     const newGenItem: CanvasItem = {
                       id: `sketch-${Date.now()}`,
-                      type: 'sketch_generated',
+                      type: 'generated',
                       src: generatedSrc,
                       x: sourceItem ? sourceItem.x + sourceItem.width + 120 : 0,
                       y: sourceItem ? sourceItem.y : 0,
@@ -1809,10 +1626,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         elevationParams: null
                       }
                     };
-                    
-                    // V2.6.0: Save to local folder
-                    saveImageToLocal(generatedSrc, 'sketch');
-                    
                     setCanvasItems(prev => {
                       setHistoryStates(prevH => [...prevH, prev]);
                       return [...prev, newGenItem];
@@ -1883,48 +1696,19 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
       const controller = new AbortController();
       abortControllerRef.current = controller;
       setAnalysisStep(`Generating ${printPages} pages of ${printTemplate}...`);
-      
       try {
-        // V2.6.0: PRINT Service Bridge Integration
-        // Service URL: http://localhost:3001/api/generate-print (Mock/Placeholder for bridge)
-        // We use AEPL parameters from selected item if available
-        const sourceItem = selectedItemIds[0] ? canvasItems.find(i => i.id === selectedItemIds[0]) : null;
-        
-        const printParams = {
-          prompt: printPrompt,
-          template: printTemplate,
-          pages: printPages,
-          aepl: sourceItem?.parameters?.elevationParams || null,
-          optical: sourceItem?.parameters?.analyzedOpticalParams || null,
-          image: sourceItem?.src || null
-        };
-
-        // Bridge Call (Simulation for now, as instruction says "URL 서비스로 호출")
-        console.log('[V2.6.0] Calling PRINT Service Bridge...', printParams);
-        
-        // Final Output Generation using Gemini for content structure
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const geminiPrompt = `
+        const prompt = `
           [Architectural Print Engine - System Protocol V250]
           Generate a ${printTemplate} document based on: "${printPrompt}"
-          AEPL Context: ${JSON.stringify(printParams.aepl)}
-          Pages: ${printPages}
-          Provide a highly structured architectural report/panel content.
+          Number of pages requested: ${printPages}.
+          Output as a structured textual report.
         `;
-        
-        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: geminiPrompt }] } });
+        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: prompt }] } });
         if (controller.signal.aborted) return;
-        
-        const printOutput = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        console.log("[V2.6.0] PRINT Output (Textual):", printOutput);
-
-        // V2.6.0: Local Save Logic (Mock image for synchronization test)
-        // In real bridge, the service would return an image URL/Base64
-        if (sourceItem?.src) {
-          saveImageToLocal(sourceItem.src, 'print');
-        }
-
-        alert("PRINT document generated and synced to ~/Pictures/cai-print");
+        const feedback = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        console.log("PRINT OUTPUT:", feedback);
+        alert("Print report generated successfully.");
       } catch (err) {
         if (err.name !== 'AbortError') console.error("Print error", err);
       } finally {
@@ -2033,7 +1817,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                             points={currentStroke.map(p => `${p.x},${p.y}`).join(' ')}
                             fill="none"
                             stroke={theme === 'dark' ? '#FFF' : '#000'}
-                            strokeWidth={penStrokeWidth}
+                            strokeWidth={2}
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             opacity={0.6}
@@ -2049,19 +1833,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                             stroke="#1d4ed8"
                             strokeWidth="1"
                             strokeDasharray="4 2"
-                          />
-                        )}
-                        {/* V255: Tool cursor indicator */}
-                        {(canvasMode === 'pen' || canvasMode === 'eraser') && (
-                          <circle
-                            cx={lastMousePos.x}
-                            cy={lastMousePos.y}
-                            r={canvasMode === 'pen' ? penStrokeWidth / 2 : eraserStrokeWidth}
-                            fill={canvasMode === 'pen' ? (theme === 'dark' ? '#FFFFFF' : '#000000') : 'none'}
-                            stroke={theme === 'dark' ? '#FFFFFF' : '#000000'}
-                            strokeWidth={canvasMode === 'eraser' ? 1 / (canvasZoom / 100) : 0}
-                            pointerEvents="none"
-                            opacity={0.6}
                           />
                         )}
                       </g>
@@ -2124,121 +1895,21 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
 
               <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
 
-              {/* V255: Pen Tool with stroke width panel */}
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    if (canvasMode === 'pen') {
-                      setShowStrokePanel(prev => prev === 'pen' ? null : 'pen');
-                    } else {
-                      setCanvasMode('pen');
-                      setShowStrokePanel(null);
-                    }
-                  }}
-                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'pen' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-                  title="Pen Tool"
-                >
-                  <Pencil size={18} />
-                </button>
-                {showStrokePanel === 'pen' && (
-                  <div
-                    className="absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 flex items-center h-8 px-0.5 gap-0.5 bg-white/90 dark:bg-black/90 border border-black/10 dark:border-white/10 rounded-full backdrop-blur-sm pointer-events-auto"
-                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)', animation: 'slideInRight 0.15s ease-out' }}
-                  >
-                    {([1, 2, 4, 6, 8] as const).map(size => (
-                      <button
-                        key={size}
-                        onClick={() => setPenStrokeWidth(size)}
-                        className="w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
-                      >
-                        {penStrokeWidth === size ? (
-                          <div
-                            className="rounded-full flex items-center justify-center"
-                            style={{
-                              width: '24px', height: '24px',
-                              backgroundColor: theme === 'dark' ? 'white' : 'black',
-                            }}
-                          >
-                            <div
-                              className="rounded-full"
-                              style={{
-                                width: `${size}px`, height: `${size}px`,
-                                backgroundColor: theme === 'dark' ? 'black' : 'white',
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div
-                            className="rounded-full"
-                            style={{
-                              width: `${size}px`, height: `${size}px`,
-                              backgroundColor: theme === 'dark' ? 'white' : 'black',
-                            }}
-                          />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* V255: Eraser Tool with stroke width panel */}
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    if (canvasMode === 'eraser') {
-                      setShowStrokePanel(prev => prev === 'eraser' ? null : 'eraser');
-                    } else {
-                      setCanvasMode('eraser');
-                      setShowStrokePanel(null);
-                    }
-                  }}
-                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'eraser' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-                  title="Eraser Tool"
-                >
-                  <Eraser size={18} />
-                </button>
-                {showStrokePanel === 'eraser' && (
-                  <div
-                    className="absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 flex items-center h-8 px-0.5 gap-0.5 bg-white/90 dark:bg-black/90 border border-black/10 dark:border-white/10 rounded-full backdrop-blur-sm pointer-events-auto"
-                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)', animation: 'slideInRight 0.15s ease-out' }}
-                  >
-                    {([2, 4, 6, 8, 10] as const).map(size => (
-                      <button
-                        key={size}
-                        onClick={() => setEraserStrokeWidth(size)}
-                        className="w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer hover:bg-black/5 dark:hover:bg-white/5"
-                      >
-                        {eraserStrokeWidth === size ? (
-                          <div
-                            className="rounded-full flex items-center justify-center"
-                            style={{
-                              width: '24px', height: '24px',
-                              backgroundColor: theme === 'dark' ? 'white' : 'black',
-                            }}
-                          >
-                            <div
-                              className="rounded-full"
-                              style={{
-                                width: `${size}px`, height: `${size}px`,
-                                backgroundColor: theme === 'dark' ? 'black' : 'white',
-                              }}
-                            />
-                          </div>
-                        ) : (
-                          <div
-                            className="rounded-full"
-                            style={{
-                              width: `${size}px`, height: `${size}px`,
-                              backgroundColor: theme === 'dark' ? 'white' : 'black',
-                            }}
-                          />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* V2.3: Engineering Tools (Pen, Eraser, Text) */}
+              <button
+                onClick={() => setCanvasMode('pen')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'pen' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Pen Tool"
+              >
+                <Pencil size={18} />
+              </button>
+              <button
+                onClick={() => setCanvasMode('eraser')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'eraser' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Eraser Tool"
+              >
+                <Eraser size={18} />
+              </button>
               <button
                 onClick={() => setCanvasMode('text')}
                 className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'text' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
@@ -2309,37 +1980,13 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
               </div>
             </div>
 
-            {/* V258: Upload Artboard Button — creates blank artboard 960×540 (16:9) */}
+            {/* V174: Relocated Independent Upload Button (Desired 18px gap between circles) */}
+            {/* Toolbar has py-2 (8px), so mt-[10px] makes total 18px gap */}
             <div className="mt-[10px] flex flex-col items-center">
               <button
-                onClick={() => {
-                  let newX = -960 / 2;
-                  let newY = -540 / 2;
-                  if (canvasItems.length > 0) {
-                    const leftMost = canvasItems.reduce((p: CanvasItem, c: CanvasItem) => p.x < c.x ? p : c);
-                    const bottomMost = canvasItems.reduce((p: CanvasItem, c: CanvasItem) =>
-                      p.y + p.height > c.y + c.height ? p : c
-                    );
-                    newX = leftMost.x;
-                    newY = bottomMost.y + bottomMost.height + 40;
-                  }
-                  const newArtboard: CanvasItem = {
-                    id: `artboard-${Date.now()}`,
-                    type: 'artboard',
-                    src: null,
-                    x: newX,
-                    y: newY,
-                    width: 960,
-                    height: 540,
-                    motherId: null,
-                    parameters: null,
-                    isLocked: false,
-                  };
-                  setHistoryStates(prev => [...prev, canvasItems]);
-                  setCanvasItems(prev => [...prev, newArtboard]);
-                }}
+                onClick={() => fileInputRef.current?.click()}
                 className="w-11 h-11 flex items-center justify-center rounded-full bg-black text-white hover:bg-neutral-800 transition-colors shadow-lg pointer-events-auto hover:cursor-pointer"
-                title="Upload Artboard"
+                title="Upload Image"
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
@@ -2348,8 +1995,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                   <path d="M7 16l3-3 2 2 4-4 3 3" />
                 </svg>
               </button>
-              {/* V257: Artboard image upload (triggered from artboard control bar) */}
-              <input type="file" ref={artboardFileInputRef} onChange={handleArtboardImageUpload} accept="image/*" className="hidden" />
+              <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
             </div>
           </div>
 
@@ -2395,7 +2041,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     width: item.width,
                     height: item.height,
                     zIndex: selectedItemIds.includes(item.id) ? 20 : 10,
-                    // Disable pointer events on items during PAN mode or when artboard is locked
+                    // Disable pointer events on items during PAN mode to allow background panning
                     pointerEvents: canvasMode === 'pan' ? 'none' : 'auto',
                     cursor: 'inherit'
                   }}
@@ -2428,27 +2074,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                           placeholder="Type here..."
                         />
                       </>
-                    ) : item.type === 'artboard' ? (
-                      /* V257: Artboard rendering */
-                      <div
-                        className="w-full h-full shadow-xl"
-                        style={{
-                          backgroundColor: 'rgba(248, 244, 232, 0.2)',
-                          backdropFilter: 'blur(2px)',
-                        }}
-                      >
-                        {item.src && (
-                          <img
-                            src={item.src}
-                            alt="artboard"
-                            className="w-full h-full object-contain pointer-events-none"
-                            draggable={false}
-                          />
-                        )}
-                      </div>
                     ) : (
                       <img
-                        src={item.src || ''}
+                        src={item.src}
                         alt={item.id}
                         className="w-full h-full object-contain pointer-events-none shadow-xl border border-black/5 dark:border-white/5"
                         referrerPolicy="no-referrer"
@@ -2459,7 +2087,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
 
                   {/* V136: Hide labels if zoom is 30% or less (V173 adjusted) */}
                   {(() => {
-                    if (item.type === 'path' || item.type === 'text' || item.type === 'artboard' || item.type === 'sketch_generated') return null;
+                    if (item.type === 'path' || item.type === 'text') return null;
                     if (canvasZoom <= 30) return null;
                     const labelText = item.type === 'upload'
                       ? 'ORIGINAL'
@@ -2493,7 +2121,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         borderWidth: `${1.6 / (canvasZoom / 100)}px`
                       }}
                     >
-                      {/* V257: Floating Control Bar — type-based */}
+                      {/* V80/V81: Floating Control Bar for All Images */}
                       <div
                         className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] px-1.5 rounded-full pointer-events-auto transition-all duration-300`}
                         style={{
@@ -2504,80 +2132,36 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
-                        {item.type === 'artboard' ? (
-                          /* V257: Artboard control bar — [Upload|Lock|Trash] */
+                        {/* V182: Add Copy (Duplicate) button at the leftmost */}
+                        <button
+                          onClick={() => {
+                            const newItem: CanvasItem = {
+                              ...item,
+                              id: `${item.id}-copy-${Date.now()}`,
+                              x: item.x + item.width + 1,
+                              y: item.y,
+                              motherId: item.id // Maintain ancestry for connection lines
+                            };
+                            setCanvasItems(prev => [...prev, newItem]);
+                            setSelectedItemIds([]); // V195: Initial state deactivated
+                          }}
+                          className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                          style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                          title="복제 (Duplicate)"
+                        >
+                          <svg width={12 / (canvasZoom / 100)} height={12 / (canvasZoom / 100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                        </button>
+                        <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+
+                        {item.type === 'generated' && (
+                          /* V82: Add Download button for generated images */
                           <>
-                            <button
-                              onClick={() => {
-                                pendingArtboardIdRef.current = item.id;
-                                artboardFileInputRef.current?.click();
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="이미지 업로드"
-                            >
-                              <Upload size={12 / (canvasZoom / 100)} />
-                            </button>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            <button
-                              onClick={() => {
-                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
-                                  i.id === item.id ? { ...i, isLocked: !i.isLocked } : i
-                                ));
-                              }}
-                              className={`flex items-center justify-center transition-colors rounded-full ${item.isLocked ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title={item.isLocked ? "잠금 해제" : "잠금"}
-                            >
-                              {item.isLocked
-                                ? <svg width={12/(canvasZoom/100)} height={12/(canvasZoom/100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                                : <svg width={12/(canvasZoom/100)} height={12/(canvasZoom/100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
-                              }
-                            </button>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            <button
-                              onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
-                                setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id));
-                                setSelectedItemIds([]);
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="삭제"
-                            >
-                              <Trash2 size={12 / (canvasZoom / 100)} />
-                            </button>
-                          </>
-                        ) : item.type === 'sketch_generated' ? (
-                          /* V257: sketch_generated control bar — [Edit|Download|Trash] */
-                          <>
-                            <button
-                              onClick={() => {
-                                const editArtboard: CanvasItem = {
-                                  id: `artboard-${Date.now()}`,
-                                  type: 'artboard',
-                                  src: item.src,
-                                  x: item.x,
-                                  y: item.y + item.height + 36,
-                                  width: item.width,
-                                  height: item.height,
-                                  motherId: item.id,
-                                  parameters: null,
-                                  isLocked: false,
-                                };
-                                setCanvasItems((prev: CanvasItem[]) => [...prev, editArtboard]);
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="편집 (아트보드로 복제)"
-                            >
-                              <Pencil size={12 / (canvasZoom / 100)} />
-                            </button>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <a
-                              href={item.src || '#'}
-                              download="sketch_result.png"
+                              href={item.src}
+                              download="simulation.png"
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
                               title="다운로드"
@@ -2585,94 +2169,36 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                               <Download size={14 / (canvasZoom / 100)} />
                             </a>
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            <button
-                              onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
-                                setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id));
-                                setSelectedItemIds([]);
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="삭제"
-                            >
-                              <Trash2 size={12 / (canvasZoom / 100)} />
-                            </button>
-                          </>
-                        ) : (
-                          /* Default control bar — upload / generated */
-                          <>
-                            {/* V182: Duplicate button */}
-                            <button
-                              onClick={() => {
-                                const newItem: CanvasItem = {
-                                  ...item,
-                                  id: `${item.id}-copy-${Date.now()}`,
-                                  x: item.x + item.width + 1,
-                                  y: item.y,
-                                  motherId: item.id
-                                };
-                                setCanvasItems((prev: CanvasItem[]) => [...prev, newItem]);
-                                setSelectedItemIds([]);
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="복제 (Duplicate)"
-                            >
-                              <svg width={12 / (canvasZoom / 100)} height={12 / (canvasZoom / 100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                              </svg>
-                            </button>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            {/* V82: Download for generated */}
-                            {item.type === 'generated' && (
-                              <>
-                                <a
-                                  href={item.src || '#'}
-                                  download="simulation.png"
-                                  className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                                  title="다운로드"
-                                >
-                                  <Download size={14 / (canvasZoom / 100)} />
-                                </a>
-                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                              </>
-                            )}
-                            {/* C-11: Library button — generated only */}
-                            {item.type === 'generated' && (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    const isOpening = openLibraryItemId !== item.id;
-                                    setOpenLibraryItemId(isOpening ? item.id : null);
-                                    if (isOpening) setArtboardPage(1);
-                                  }}
-                                  className={`flex items-center justify-center transition-all rounded-full ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                                  title="라이브러리 (아트보드)"
-                                >
-                                  <Book size={12 / (canvasZoom / 100)} />
-                                </button>
-                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                              </>
-                            )}
-                            <button
-                              onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
-                                setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
-                                setSelectedItemIds([]);
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="삭제"
-                            >
-                              <Trash2 size={12 / (canvasZoom / 100)} />
-                            </button>
                           </>
                         )}
+                        {/* V180: Library button enabled concurrently with GENERATE button */}
+                        <button
+                          onClick={() => {
+                            const isOpening = openLibraryItemId !== item.id;
+                            setOpenLibraryItemId(isOpening ? item.id : null);
+                            if (isOpening) setArtboardPage(1);
+                          }}
+                          disabled={!item.parameters?.analyzedOpticalParams && item.type !== 'generated'}
+                          className={`flex items-center justify-center transition-all rounded-full ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'} ${(!item.parameters?.analyzedOpticalParams && item.type !== 'generated') ? 'opacity-20 cursor-not-allowed' : 'opacity-100'}`}
+                          style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                          title="라이브러리 (아트보드)"
+                        >
+                          <Book size={12 / (canvasZoom / 100)} />
+                        </button>
+                        <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                        <button
+                          onClick={() => {
+                            setHistoryStates(prevH => [...prevH, canvasItems]);
+                            setRedoStates([]);
+                            setCanvasItems(prev => prev.filter(i => i.id !== item.id && i.motherId !== item.id));
+                            setSelectedItemIds([]);
+                          }}
+                          className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
+                          style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                          title="삭제"
+                        >
+                          <Trash2 size={12 / (canvasZoom / 100)} />
+                        </button>
                       </div>
 
                       {/* V180/V2.2: Item-bound Library Artboard (Architecture Sheet) */}
@@ -2989,7 +2515,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     <div className="px-4 pb-2 pt-2 shrink-0">
                       <button
                         onClick={isGenerating ? handleCancelGenerate : handleGenerate}
-                        disabled={(!isGenerating && areSlidersLocked) || selectedItemIds.length === 0 || (!canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0])?.parameters?.analyzedOpticalParams && canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0])?.type !== 'generated' && canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0])?.type !== 'artboard')}
+                        disabled={(!isGenerating && areSlidersLocked) || selectedItemIds.length === 0 || (!canvasItems.find(i => i.id === selectedItemIds[0])?.parameters?.analyzedOpticalParams && canvasItems.find(i => i.id === selectedItemIds[0])?.type !== 'generated')}
                         className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                       >
                         <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
@@ -3159,14 +2685,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     <div className="px-4 pb-2 pt-5 shrink-0">
                       <button
                         onClick={handleGenerate}
-                        disabled={
-                          !sketchMode || !sketchStyle || isGenerating ||
-                          !selectedItemIds.length ||
-                          !canvasItems.find((i: CanvasItem) =>
-                            i.id === selectedItemIds[0] &&
-                            (i.type === 'artboard' || i.type === 'upload' || i.type === 'generated')
-                          )
-                        }
+                        disabled={!sketchMode || !sketchStyle || isGenerating}
                         className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                       >
                         <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">

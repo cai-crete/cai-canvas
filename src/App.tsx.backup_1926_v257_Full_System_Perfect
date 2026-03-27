@@ -415,7 +415,6 @@ export default function App() {
   const artboardFileInputRef = useRef<HTMLInputElement>(null); // V257: artboard image upload
   const pendingArtboardIdRef = useRef<string | null>(null); // V257: target artboard for upload
   const activeDrawBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null); // V257: C-10 drawing bounds
-  const activeDrawTargetIdRef = useRef<string | null>(null); // V258: artboard/item ID for motherId linkage
   const canvasRef = useRef<HTMLElement>(null); // V54: Absolute ref for canvas section
   const canvasOffsetRef = useRef({ x: 0, y: 0 });
   const canvasZoomRef = useRef(100);
@@ -786,7 +785,7 @@ export default function App() {
       if (resizeCorner && selectedItemIds.length === 1) {
         const selectedId = selectedItemIds[0];
         const item = canvasItems.find(i => i.id === selectedId);
-        if (item && !(item.type === 'artboard' && item.isLocked)) { // V258: locked artboard cannot be resized
+        if (item) {
           setHistoryStates(prev => [...prev, canvasItems]);
           setRedoStates([]);
 
@@ -802,7 +801,6 @@ export default function App() {
       // 2. Check Item Click for Selection/Drag (V254: path excluded — B-3)
       const clickedItem = [...canvasItems].reverse().find((item: CanvasItem) => {
         if (item.type === 'path') return false;
-        if (item.type === 'artboard' && item.isLocked) return false; // V258: locked artboard cannot be dragged
         return coords.x >= item.x && coords.x <= item.x + item.width &&
                coords.y >= item.y && coords.y <= item.y + item.height;
       });
@@ -836,22 +834,11 @@ export default function App() {
           pendingToggleItemIdRef.current = clickedItem.id;
         }
 
-        // V258 C-6: Also collect start positions of motherId-linked children
-        const startPositions: Record<string, { x: number; y: number }> = {};
-        for (const id of currentSelection) {
-          const itm = canvasItems.find((i: CanvasItem) => i.id === id);
-          if (itm) {
-            startPositions[id] = { x: itm.x, y: itm.y };
-            if (itm.type === 'artboard' || itm.type === 'upload' || itm.type === 'generated') {
-              canvasItems.forEach((child: CanvasItem) => {
-                if (child.motherId === id && (child.type === 'path' || child.type === 'text')) {
-                  startPositions[child.id] = { x: child.x, y: child.y };
-                }
-              });
-            }
-          }
-        }
-        clickedItemStartPositionsRef.current = startPositions;
+        clickedItemStartPositionsRef.current = currentSelection.reduce((acc, id) => {
+          const itm = canvasItems.find(i => i.id === id);
+          if (itm) acc[id] = { x: itm.x, y: itm.y };
+          return acc;
+        }, {} as Record<string, { x: number, y: number }>);
 
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
@@ -880,7 +867,6 @@ export default function App() {
       );
       if (!drawTarget) return;
       activeDrawBoundsRef.current = { x: drawTarget.x, y: drawTarget.y, width: drawTarget.width, height: drawTarget.height };
-      activeDrawTargetIdRef.current = drawTarget.id; // V258: save target for motherId
       setHistoryStates(prev => [...prev, canvasItems]);
       setRedoStates([]);
       setIsDrawing(true);
@@ -903,14 +889,6 @@ export default function App() {
       eraseAtPoint(coords);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'text') {
-      // V258 C-4: Restrict text to drawable item bounds
-      const textTarget = canvasItems.find((item: CanvasItem) =>
-        (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
-        coords.x >= item.x && coords.x <= item.x + item.width &&
-        coords.y >= item.y && coords.y <= item.y + item.height
-      );
-      if (!textTarget) return;
-      activeDrawTargetIdRef.current = textTarget.id; // V258: save target for motherId
       setIsCreatingText(true);
       isCreatingTextRef.current = true; // V2.4: Set atomic lock
       setTextStartPos(coords);
@@ -948,6 +926,7 @@ export default function App() {
         y: e.clientY - dragStartRef.current.y
       });
     } else if (isDraggingItemRef.current && selectedItemIdsRef.current.length > 0) {
+      const currentIds = selectedItemIdsRef.current;
       const dx = coords.x - dragStartRef.current.x;
       const dy = coords.y - dragStartRef.current.y;
 
@@ -957,10 +936,9 @@ export default function App() {
       }
 
       setCanvasItems(prev => prev.map(item => {
+        if (!currentIds.includes(item.id)) return item;
         const startPos = clickedItemStartPositionsRef.current[item.id];
-        if (!startPos) return item;
-        // V258 C-6: Move selected items + motherId-linked children (path/text)
-        return { ...item, x: startPos.x + dx, y: startPos.y + dy };
+        return startPos ? { ...item, x: startPos.x + dx, y: startPos.y + dy } : item;
       }));
     } else if (isResizingItemRef.current && selectedItemIdsRef.current.length === 1) {
       const selectedId = selectedItemIdsRef.current[0];
@@ -1039,10 +1017,10 @@ export default function App() {
           id: `path-${Date.now()}`,
           type: 'path',
           src: '',
-          x: minX, y: minY,
-          width: Math.max(maxX - minX, 2),
+          x: minX, y: minY, 
+          width: Math.max(maxX - minX, 2), 
           height: Math.max(maxY - minY, 2),
-          motherId: activeDrawTargetIdRef.current, // V258: link to parent item
+          motherId: null,
           parameters: {
             points: relativePoints,
             strokeColor: theme === 'dark' ? '#FFFFFF' : '#000000',
@@ -1063,23 +1041,15 @@ export default function App() {
       if (width > 10 && height > 10) {
         setHistoryStates(prev => [...prev, canvasItems]);
         setRedoStates([]);
-        // V258 C-5: Clip text box to parent item bounds
-        const textParent = canvasItems.find((i: CanvasItem) => i.id === activeDrawTargetIdRef.current);
-        const rawX = Math.min(coords.x, textStartPos.x);
-        const rawY = Math.min(coords.y, textStartPos.y);
-        const clampedX = textParent ? Math.max(textParent.x, rawX) : rawX;
-        const clampedY = textParent ? Math.max(textParent.y, rawY) : rawY;
-        const clampedW = textParent ? Math.min(width, textParent.x + textParent.width - clampedX) : width;
-        const clampedH = textParent ? Math.min(height, textParent.y + textParent.height - clampedY) : height;
         const newItem: CanvasItem = {
           id: `text-${Date.now()}`,
           type: 'text',
           src: '',
-          x: clampedX,
-          y: clampedY,
-          width: clampedW,
-          height: clampedH,
-          motherId: activeDrawTargetIdRef.current, // V258: link to parent item
+          x: Math.min(coords.x, textStartPos.x),
+          y: Math.min(coords.y, textStartPos.y),
+          width: width,
+          height: height,
+          motherId: null,
           parameters: {
             content: "", // V2.4: Start with empty content
             fontSize: 14,
@@ -1104,7 +1074,6 @@ export default function App() {
 
     isErasingRef.current = false;
     activeDrawBoundsRef.current = null; // V257 C-10: clear draw bounds
-    activeDrawTargetIdRef.current = null; // V258 C-5: clear target id
     isDraggingPanRef.current = false;
     isDraggingItemRef.current = false;
     isResizingItemRef.current = false;
@@ -1184,7 +1153,7 @@ export default function App() {
       const base64Image = reader.result as string;
       const img = new Image();
       img.onload = () => {
-        const newHeight = Math.round(img.height * (960 / img.width));
+        const newHeight = Math.round(img.height * (595 / img.width));
         setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
           i.id === artboardId ? { ...i, src: base64Image, height: newHeight } : i
         ));
@@ -1436,33 +1405,6 @@ export default function App() {
     }
   };
 
-  // --- V2.6.0: Local Server Image Save Helper ---
-  const saveImageToLocal = async (base64Data: string, type: 'sketch' | 'print' | 'viewpoint') => {
-    try {
-      const folderMap = {
-        sketch: 'cai-sketch',
-        print: 'cai-print',
-        viewpoint: 'cai-sketch' // Standardized as per instructions
-      };
-      
-      const response = await fetch('/api/save-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          images: [base64Data],
-          folderName: folderMap[type]
-        })
-      });
-      
-      const result = await response.json();
-      console.log(`[V2.6.0] Save to ${folderMap[type]} result:`, result);
-      return result;
-    } catch (err) {
-      console.error('[V2.6.0] Failed to save image locally:', err);
-      return null;
-    }
-  };
-
   // ---
   // PHASE 4: SYNTHESIS & GENERATION (Mother App Unified Controller)
   // ---
@@ -1624,10 +1566,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                           elevationParams: localElevationParams, sitePlanImage, elevationImages: localElevationImages
                         }
                       };
-                      
-                      // V2.6.0: Save to local folder
-                      saveImageToLocal(generatedSrc, 'viewpoint');
-                      
                       setCanvasItems(prev => {
                         setHistoryStates(prevH => [...prevH, prev]);
                         const siblings = prev.filter(i => i.type === 'generated' && (i.motherId === sourceItem.id || i.motherId === sourceItem.motherId));
@@ -1711,77 +1649,15 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
           Please generate the image now adhering to the Blueprint Protocol.
         `.trim();
 
-        // V258 C-8: Build composite image once (outside runGen to avoid duplicate on fallback)
-        const sourceItem = selectedItemIds[0] ? canvasItems.find((item: CanvasItem) => item.id === selectedItemIds[0]) : null;
-
-        const createArtboardComposite = (artboard: CanvasItem): Promise<string | null> =>
-          new Promise((resolve) => {
-            const canvas = document.createElement('canvas');
-            canvas.width = artboard.width;
-            canvas.height = artboard.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { resolve(null); return; }
-
-            ctx.fillStyle = 'rgba(248, 244, 232, 1)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            const drawOverlays = () => {
-              // Paths with motherId === artboard.id
-              canvasItems.filter((i: CanvasItem) => i.type === 'path' && i.motherId === artboard.id).forEach((pathItem: CanvasItem) => {
-                const pts: { x: number; y: number }[] = pathItem.parameters?.points || [];
-                if (pts.length < 2) return;
-                ctx.beginPath();
-                ctx.strokeStyle = pathItem.parameters?.strokeColor || '#000000';
-                ctx.lineWidth = pathItem.parameters?.strokeWidth || 2;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                const ox = pathItem.x - artboard.x;
-                const oy = pathItem.y - artboard.y;
-                ctx.moveTo(ox + pts[0].x, oy + pts[0].y);
-                for (let k = 1; k < pts.length; k++) ctx.lineTo(ox + pts[k].x, oy + pts[k].y);
-                ctx.stroke();
-              });
-              // Text items with motherId === artboard.id
-              canvasItems.filter((i: CanvasItem) => i.type === 'text' && i.motherId === artboard.id).forEach((textItem: CanvasItem) => {
-                const content: string = textItem.parameters?.content || '';
-                const fontSize: number = textItem.parameters?.fontSize || 14;
-                const color: string = textItem.parameters?.color || '#000000';
-                ctx.font = `${fontSize}px sans-serif`;
-                ctx.fillStyle = color;
-                const tx = textItem.x - artboard.x + 8;
-                const ty = textItem.y - artboard.y;
-                content.split('\n').forEach((line: string, li: number) => {
-                  ctx.fillText(line, tx, ty + fontSize * 1.4 * (li + 1));
-                });
-              });
-              resolve(canvas.toDataURL('image/png'));
-            };
-
-            if (artboard.src) {
-              const img = new Image();
-              img.onload = () => { ctx.drawImage(img, 0, 0, canvas.width, canvas.height); drawOverlays(); };
-              img.onerror = () => drawOverlays();
-              img.src = artboard.src;
-            } else {
-              drawOverlays();
-            }
-          });
-
-        let compositeData: string | null = null;
-        if (sourceItem?.type === 'artboard') {
-          compositeData = await createArtboardComposite(sourceItem);
-        } else if (sourceItem?.src) {
-          compositeData = sourceItem.src;
-        }
-
         const runGen = async (modelName: string) => {
           const parts: any[] = [{ text: systemPrompt }, { text: finalPrompt }];
-
-          if (compositeData) {
-            parts.unshift({ inlineData: {
-              data: compositeData.split(',')[1],
-              mimeType: compositeData.split(';')[0].split(':')[1]
-            }});
+          
+          // If we have a selected image, we can use it as a reference (sketch)
+          const sourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : null;
+          if (sourceItem) {
+            const base64Data = sourceItem.src.split(',')[1];
+            const mimeType = sourceItem.src.split(';')[0].split(':')[1];
+            parts.unshift({ inlineData: { data: base64Data, mimeType: mimeType } });
           }
 
           const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
@@ -1809,10 +1685,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                         elevationParams: null
                       }
                     };
-                    
-                    // V2.6.0: Save to local folder
-                    saveImageToLocal(generatedSrc, 'sketch');
-                    
                     setCanvasItems(prev => {
                       setHistoryStates(prevH => [...prevH, prev]);
                       return [...prev, newGenItem];
@@ -1883,48 +1755,19 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
       const controller = new AbortController();
       abortControllerRef.current = controller;
       setAnalysisStep(`Generating ${printPages} pages of ${printTemplate}...`);
-      
       try {
-        // V2.6.0: PRINT Service Bridge Integration
-        // Service URL: http://localhost:3001/api/generate-print (Mock/Placeholder for bridge)
-        // We use AEPL parameters from selected item if available
-        const sourceItem = selectedItemIds[0] ? canvasItems.find(i => i.id === selectedItemIds[0]) : null;
-        
-        const printParams = {
-          prompt: printPrompt,
-          template: printTemplate,
-          pages: printPages,
-          aepl: sourceItem?.parameters?.elevationParams || null,
-          optical: sourceItem?.parameters?.analyzedOpticalParams || null,
-          image: sourceItem?.src || null
-        };
-
-        // Bridge Call (Simulation for now, as instruction says "URL 서비스로 호출")
-        console.log('[V2.6.0] Calling PRINT Service Bridge...', printParams);
-        
-        // Final Output Generation using Gemini for content structure
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const geminiPrompt = `
+        const prompt = `
           [Architectural Print Engine - System Protocol V250]
           Generate a ${printTemplate} document based on: "${printPrompt}"
-          AEPL Context: ${JSON.stringify(printParams.aepl)}
-          Pages: ${printPages}
-          Provide a highly structured architectural report/panel content.
+          Number of pages requested: ${printPages}.
+          Output as a structured textual report.
         `;
-        
-        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: geminiPrompt }] } });
+        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: prompt }] } });
         if (controller.signal.aborted) return;
-        
-        const printOutput = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        console.log("[V2.6.0] PRINT Output (Textual):", printOutput);
-
-        // V2.6.0: Local Save Logic (Mock image for synchronization test)
-        // In real bridge, the service would return an image URL/Base64
-        if (sourceItem?.src) {
-          saveImageToLocal(sourceItem.src, 'print');
-        }
-
-        alert("PRINT document generated and synced to ~/Pictures/cai-print");
+        const feedback = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        console.log("PRINT OUTPUT:", feedback);
+        alert("Print report generated successfully.");
       } catch (err) {
         if (err.name !== 'AbortError') console.error("Print error", err);
       } finally {
@@ -2309,12 +2152,12 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
               </div>
             </div>
 
-            {/* V258: Upload Artboard Button — creates blank artboard 960×540 (16:9) */}
+            {/* V257: Upload Artboard Button — creates blank artboard 595×842 */}
             <div className="mt-[10px] flex flex-col items-center">
               <button
                 onClick={() => {
-                  let newX = -960 / 2;
-                  let newY = -540 / 2;
+                  let newX = -595 / 2;
+                  let newY = -842 / 2;
                   if (canvasItems.length > 0) {
                     const leftMost = canvasItems.reduce((p: CanvasItem, c: CanvasItem) => p.x < c.x ? p : c);
                     const bottomMost = canvasItems.reduce((p: CanvasItem, c: CanvasItem) =>
@@ -2329,8 +2172,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     src: null,
                     x: newX,
                     y: newY,
-                    width: 960,
-                    height: 540,
+                    width: 595,
+                    height: 842,
                     motherId: null,
                     parameters: null,
                     isLocked: false,
@@ -2396,7 +2239,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     height: item.height,
                     zIndex: selectedItemIds.includes(item.id) ? 20 : 10,
                     // Disable pointer events on items during PAN mode or when artboard is locked
-                    pointerEvents: canvasMode === 'pan' ? 'none' : 'auto',
+                    pointerEvents: (canvasMode === 'pan' || (item.type === 'artboard' && item.isLocked)) ? 'none' : 'auto',
                     cursor: 'inherit'
                   }}
                 >
@@ -2433,7 +2276,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                       <div
                         className="w-full h-full shadow-xl"
                         style={{
-                          backgroundColor: 'rgba(248, 244, 232, 0.2)',
+                          backgroundColor: 'rgba(248, 244, 232, 0.5)',
                           backdropFilter: 'blur(2px)',
                         }}
                       >
@@ -2989,7 +2832,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     <div className="px-4 pb-2 pt-2 shrink-0">
                       <button
                         onClick={isGenerating ? handleCancelGenerate : handleGenerate}
-                        disabled={(!isGenerating && areSlidersLocked) || selectedItemIds.length === 0 || (!canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0])?.parameters?.analyzedOpticalParams && canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0])?.type !== 'generated' && canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0])?.type !== 'artboard')}
+                        disabled={(!isGenerating && areSlidersLocked) || selectedItemIds.length === 0 || (!canvasItems.find(i => i.id === selectedItemIds[0])?.parameters?.analyzedOpticalParams && canvasItems.find(i => i.id === selectedItemIds[0])?.type !== 'generated')}
                         className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                       >
                         <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
@@ -3159,14 +3002,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
                     <div className="px-4 pb-2 pt-5 shrink-0">
                       <button
                         onClick={handleGenerate}
-                        disabled={
-                          !sketchMode || !sketchStyle || isGenerating ||
-                          !selectedItemIds.length ||
-                          !canvasItems.find((i: CanvasItem) =>
-                            i.id === selectedItemIds[0] &&
-                            (i.type === 'artboard' || i.type === 'upload' || i.type === 'generated')
-                          )
-                        }
+                        disabled={!sketchMode || !sketchStyle || isGenerating}
                         className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                       >
                         <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
