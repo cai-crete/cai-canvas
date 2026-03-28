@@ -7,7 +7,17 @@
       "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/RightPanel.tsx\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/LeftPanel.tsx\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/nodes/StickyNode.tsx\")",
-      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/nodes/TurnGroupNode.tsx\")"
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/nodes/TurnGroupNode.tsx\")",
+      "Bash(curl -s \"https://api.github.com/repos/cai-crete/cai-planners/git/trees/main?recursive=1\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(item[''path'']\\) for item in data.get\\(''tree'',[]\\) if item[''type'']==''blob'' and item[''path''].startswith\\(''src/''\\)]\")",
+      "Bash(gh api repos/cai-crete/cai-planners/git/trees/main?recursive=1)",
+      "Bash(python3 -c \":*)",
+      "Bash(gh api repos/cai-crete/cai-planners/git/trees/main --jq '.tree[] | select\\(.type==\"\"blob\"\"\\) | .path')",
+      "WebFetch(domain:api.github.com)",
+      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/lib/experts.ts)",
+      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/lib/gemini.ts)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/lib/synergyData.ts\")",
+      "Bash(npx tsc --noEmit)"
     ]
   }
 }
