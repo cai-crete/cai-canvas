@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-planners/main/vercel.json)"
+      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-planners/main/vercel.json)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/RightPanel.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/LeftPanel.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/nodes/StickyNode.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/nodes/TurnGroupNode.tsx\")"
     ]
   }
 }
