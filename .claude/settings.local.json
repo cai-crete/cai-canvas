@@ -17,7 +17,26 @@
       "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/lib/experts.ts)",
       "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/lib/gemini.ts)",
       "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/lib/synergyData.ts\")",
-      "Bash(npx tsc --noEmit)"
+      "Bash(npx tsc --noEmit)",
+      "Bash(ls \"d:\\\\OneDrive\\\\바탕 화면\\\\CRETE\\\\change-viewpoint\"\" | grep -i \"작업지시서 \")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/types/index.ts\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/Shared.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplatePanel.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateCover.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateTOC.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateBodyA.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateBodyB.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateBodyC.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateDrawing.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateVideo.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/components/templates/TemplateImage.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-print/main/src/App.tsx\")",
+      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-print/main/src/App.tsx)",
+      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-print/main/src/types/index.ts)",
+      "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-print/main/src/constants/defaultData.ts)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/edges/ProtocolEdge.tsx\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/App.tsx\")",
+      "Bash(curl -s \"https://api.github.com/repos/cai-crete/cai-planners/contents/src/components/edges\")"
     ]
   }
 }
