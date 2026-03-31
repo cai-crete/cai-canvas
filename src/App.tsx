@@ -3123,16 +3123,37 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
-                        {/* V284 F / V283 C: IMAGE / VIEW 통합 툴바 — 타입 무관 [edit+|download|library|delete] */}
+                        {/* V294 A: IMAGE / VIEW 통합 툴바 — edit(+) 클릭 시 우측 파생 아트보드 생성 */}
                         {item.label === 'IMAGE / VIEW' ? (
                           <>
                             <button
                               onClick={() => {
-                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
-                                  i.id === item.id
-                                    ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: 'IMAGE / VIEW' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
-                                    : i
-                                ));
+                                setCanvasItems((prev: CanvasItem[]) => {
+                                  let newX = item.x + item.width + 120;
+                                  let newY = item.y;
+                                  
+                                  const siblingEdits = prev.filter((c: CanvasItem) => c.type === 'artboard' && c.motherId === item.id);
+                                  if (siblingEdits.length > 0) {
+                                      const rightMost = siblingEdits.reduce((max, cur) => cur.x > max.x ? cur : max, siblingEdits[0]);
+                                      newX = rightMost.x + rightMost.width + 120;
+                                      newY = rightMost.y;
+                                  }
+                                  
+                                  const newArtboard: CanvasItem = {
+                                    id: `artboard-edit-${Date.now()}`,
+                                    type: 'artboard',
+                                    src: item.src,
+                                    x: newX,
+                                    y: newY,
+                                    width: item.width,
+                                    height: item.height,
+                                    motherId: item.id,
+                                    parameters: null
+                                  };
+
+                                  setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
+                                  return [...prev, newArtboard]; 
+                                });
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
