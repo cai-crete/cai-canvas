@@ -329,7 +329,10 @@ export default function App() {
   const isDraggingPanRef = useRef(false);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const dragStartRef = useRef({ x: 0, y: 0 });
-  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, itemX: 0, itemY: 0 });
+  const resizeStartRef = useRef<{ 
+    x: number, y: number, width: number, height: number, itemX: number, itemY: number, 
+    childPaths?: Record<string, any> 
+  }>({ x: 0, y: 0, width: 0, height: 0, itemX: 0, itemY: 0 });
   const resizeCornerRef = useRef({ dx: 1, dy: 1 });
   // V189: Store multiple starting positions for drag
   const clickedItemStartPositionsRef = useRef<Record<string, { x: number, y: number }>>({});
@@ -859,7 +862,20 @@ export default function App() {
           isResizingItemRef.current = true;
           setIsResizingItem(true);
           resizeCornerRef.current = { dx: parseInt(resizeCorner.dx!), dy: parseInt(resizeCorner.dy!) };
-          resizeStartRef.current = { x: coords.x, y: coords.y, width: item.width, height: item.height, itemX: item.x, itemY: item.y };
+          
+          // V281: 해당 아이템에 종속된 스케치선 정보 임시 저장
+          const childPaths: Record<string, any> = {};
+          canvasItems.forEach(child => {
+            if (child.motherId === item.id && child.type === 'path') {
+               childPaths[child.id] = {
+                 x: child.x, y: child.y, width: child.width, height: child.height, 
+                 points: child.parameters?.points ? [...child.parameters.points] : [],
+                 strokeWidth: child.parameters?.strokeWidth ?? 2
+               };
+            }
+          });
+          
+          resizeStartRef.current = { x: coords.x, y: coords.y, width: item.width, height: item.height, itemX: item.x, itemY: item.y, childPaths };
           e.currentTarget.setPointerCapture(e.pointerId);
           return;
         }
@@ -910,7 +926,7 @@ export default function App() {
             const itm = canvasItems.find((i: CanvasItem) => i.id === id);
             if (itm) {
               startPositions[id] = { x: itm.x, y: itm.y };
-              if (itm.type === 'artboard' || itm.type === 'upload' || itm.type === 'generated') {
+              if (itm.type === 'artboard' || itm.type === 'upload' || itm.type === 'generated' || itm.type === 'sketch_generated') { // V281: sketch_generated 자식 묶음
                 canvasItems.forEach((child: CanvasItem) => {
                   if (child.motherId === id && (child.type === 'path' || child.type === 'text')) {
                     startPositions[child.id] = { x: child.x, y: child.y };
@@ -1048,21 +1064,42 @@ export default function App() {
       const dy = coords.y - resizeStartRef.current.y;
       const aspect = resizeStartRef.current.width / resizeStartRef.current.height;
 
+      // V281: 부모 리사이징 비율 선계산
+      const rawDeltaW = dx * resizeCornerRef.current.dx;
+      const newWidth = Math.max(resizeStartRef.current.width + rawDeltaW, 50);
+      const newHeight = newWidth / aspect;
+      const scaleRatio = newWidth / resizeStartRef.current.width;
+
+      const newX = resizeCornerRef.current.dx === -1
+        ? resizeStartRef.current.itemX + (resizeStartRef.current.width - newWidth)
+        : resizeStartRef.current.itemX;
+      const newY = resizeCornerRef.current.dy === -1
+        ? resizeStartRef.current.itemY + (resizeStartRef.current.height - newHeight)
+        : resizeStartRef.current.itemY;
+
       setCanvasItems(prev => prev.map(item => {
-        if (item.id !== selectedId) return item;
-
-        const rawDeltaW = dx * resizeCornerRef.current.dx;
-        const newWidth = Math.max(resizeStartRef.current.width + rawDeltaW, 50);
-        const newHeight = newWidth / aspect;
-
-        const newX = resizeCornerRef.current.dx === -1
-          ? resizeStartRef.current.itemX + (resizeStartRef.current.width - newWidth)
-          : resizeStartRef.current.itemX;
-        const newY = resizeCornerRef.current.dy === -1
-          ? resizeStartRef.current.itemY + (resizeStartRef.current.height - newHeight)
-          : resizeStartRef.current.itemY;
-
-        return { ...item, x: newX, y: newY, width: newWidth, height: newHeight };
+        if (item.id === selectedId) {
+          return { ...item, x: newX, y: newY, width: newWidth, height: newHeight };
+        } else if (item.motherId === selectedId && item.type === 'path' && resizeStartRef.current.childPaths?.[item.id]) {
+          // V281: 스케치선 사이즈 연동 동기화
+          const original = resizeStartRef.current.childPaths[item.id];
+          const scaledRelX = (original.x - resizeStartRef.current.itemX) * scaleRatio;
+          const scaledRelY = (original.y - resizeStartRef.current.itemY) * scaleRatio;
+          
+          return { 
+            ...item, 
+            x: newX + scaledRelX, 
+            y: newY + scaledRelY, 
+            width: original.width * scaleRatio, 
+            height: original.height * scaleRatio,
+            parameters: {
+              ...item.parameters,
+              points: original.points.map((p: any) => ({ x: p.x * scaleRatio, y: p.y * scaleRatio })),
+              strokeWidth: original.strokeWidth * scaleRatio
+            }
+          };
+        }
+        return item;
       }));
     }
   };
@@ -1272,7 +1309,7 @@ export default function App() {
       img.onload = () => {
         const newHeight = Math.round(img.height * (960 / img.width));
         setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
-          i.id === artboardId ? { ...i, src: base64Image, height: newHeight } : i
+          i.id === artboardId ? { ...i, src: base64Image, height: newHeight, label: i.label || 'ORIGINAL' } : i
         ));
       };
       img.src = base64Image;
@@ -1340,7 +1377,7 @@ export default function App() {
 
     setSitePlanImage(analysisImage);
     setCanvasItems(prev => prev.map(i =>
-      i.id === sourceItem.id ? { ...i, label: 'ANALYZED' } : i
+      i.id === sourceItem.id ? { ...i, label: 'GENERATED / VIEW' } : i
     ));
     await analyzeViewpoint(analysisImage, sourceItem.id);
   };
@@ -1760,15 +1797,17 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                     img.onload = () => {
                       const updatedOpticalParams = { angle: ANGLES[angleIndex], altitude: ALTITUDES[altitudeIndex].label, lens: LENSES[lensIndex].label, time: TIMES[timeIndex] };
                       // V272 F-2: VIEWPOINT label 자동 증가
-                      const vpCount = canvasItems.filter((ci: CanvasItem) => ci.label?.startsWith('VIEWPOINT')).length + 1;
+                      // V284 E: VIEW XX 넘버링
+                      const vpCount = canvasItems.filter((ci: CanvasItem) => ci.label?.startsWith('VIEW ')).length + 1;
                       const newGenItem: CanvasItem = {
                         id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                         type: 'generated',
                         src: generatedSrc,
                         x: 0, y: sourceItem.y,
                         width: img.width * 0.3, height: img.height * 0.3,
-                        motherId: sourceItem.motherId || sourceItem.id,
-                        label: `VIEWPOINT ${String(vpCount).padStart(2, '0')}`,  // V272
+                        // V283 D: VIEWPOINT 01 연결선이 ANALYZED 모체에 직접 연결되도록
+                        motherId: sourceItem.id,
+                        label: `VIEW ${String(vpCount).padStart(2, '0')}`,  // V284 E
                         parameters: {
                           angleIndex, altitudeIndex, lensIndex, timeIndex,
                           analyzedOpticalParams: updatedOpticalParams,
@@ -1782,7 +1821,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                       
                       setCanvasItems(prev => {
                         setHistoryStates(prevH => [...prevH, prev]);
-                        const siblings = prev.filter(i => i.type === 'generated' && (i.motherId === sourceItem.id || i.motherId === sourceItem.motherId));
+                        // V283 D: siblings 필터 단순화 — sourceItem.id 직접 참조
+                        const siblings = prev.filter((i: CanvasItem) => i.type === 'generated' && i.motherId === sourceItem.id);
                         if (siblings.length === 0) {
                           newGenItem.x = sourceItem.x + sourceItem.width + 120;
                           newGenItem.y = (sourceItem.y + sourceItem.height * 0.25) - newGenItem.height;
@@ -1791,7 +1831,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           newGenItem.x = bottomMost.x;
                           newGenItem.y = bottomMost.y + bottomMost.height + 96;
                         }
-                        return [...prev, newGenItem];
+                        // V280: CHANGE VIEWPOINT 생성 후 모체 라벨을 ANALYZED로 덮어씌움
+                        return [...prev.map(i => i.id === sourceItem.id ? { ...i, label: 'GENERATED / VIEW' } : i), newGenItem];
                       });
                       if (!isFirstTime) setActiveTab('result');
                       resolve();
@@ -1957,14 +1998,15 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
                         return prev.map((i: CanvasItem) => {
                           if (i.id !== sourceItem.id) return i;
-                          const editNum = i.editVersions!.length;
-                          const newVersion = { src: generatedSrc, label: `EDIT ${String(editNum).padStart(2, '0')}` };
+                          // V284 C: EDIT XX label 폐기
+                          const newVersion = { src: generatedSrc, label: undefined as unknown as string };
                           return { ...i, editVersions: [...i.editVersions!, newVersion], activeVersionIndex: i.editVersions!.length };
                         });
                       });
                     } else {
                       // 새 sketch_generated 아이템 생성 (V279: 파라미터 제외 & 팬아웃 스태킹)
-                      const targetMotherId = sourceItem ? (sourceItem.motherId || sourceItem.id) : null;
+                      // V283 B: EDITED 01 연결선이 EDIT 01에 연결되도록 sourceItem.id 직접 사용
+                      const targetMotherId = sourceItem?.id ?? null;
                       
                       setCanvasItems((prev: CanvasItem[]) => {
                         let newX = sourceItem ? sourceItem.x + sourceItem.width + 120 : 0;
@@ -1979,6 +2021,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           }
                         }
                         
+                        // V284 C: EDITED XX label 폐기 — 항상 GENERATED
+                        const genLabel = 'GENERATED';
+
                         const newGenItem: CanvasItem = {
                           id: `sketch-${Date.now()}`,
                           type: 'sketch_generated',
@@ -1988,10 +2033,10 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           width: img.width * 0.4,
                           height: img.height * 0.4,
                           motherId: targetMotherId,
-                          label: 'SKETCH', // V279: GENERATED -> SKETCH
+                          label: genLabel, // V280: 동적 네이밍 규칙 적용
                           parameters: {
                             angleIndex: 4, altitudeIndex: 2, lensIndex: 1, timeIndex: 2,
-                            analyzedOpticalParams: null, // V279 버그 수정 (CHANGE VIEWPOINT 자동 분석 방해 방지)
+                            analyzedOpticalParams: null, 
                             elevationParams: null,
                             sketchMode, sketchStyle, activeDetailStyle, resolution, aspectRatio,
                             sketchPrompt  // V269
@@ -2000,10 +2045,11 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         
                         setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
                         
-                        // V272 F-2: 소스 artboard에 'SKETCH' 레이블
+                        // V280: 소스 아트보드는 생성 후 SKETCH로 지정 (단, EDIT 상태는 제외)
                         if (sourceItem?.type === 'artboard') {
                           return [...prev.map((i: CanvasItem) =>
-                            i.id === sourceItem.id ? { ...i, label: 'SKETCH' } : i
+                            // V284 C: EDIT 조건 제거 — SKETCH 아닌 경우 → SKETCH
+                            i.id === sourceItem.id && i.label !== 'SKETCH' ? { ...i, label: 'SKETCH' } : i
                           ), newGenItem];
                         } else {
                           return [...prev, newGenItem];
@@ -2582,6 +2628,68 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
             </div>
           )}
 
+          {/* V282 B+C: 캔버스 레벨 로더 오버레이 (z-102) — 스케치(z-100) 위, 뷰 컨트롤(z-105) 아래 */}
+          {(isAnalyzing || isGenerating) && selectedItemIds.length > 0 && (
+            <div
+              className="absolute inset-0 pointer-events-none z-[102]"
+              style={{
+                transform: `translate(calc(50% + ${canvasOffset.x}px), calc(50% + ${canvasOffset.y}px)) scale(${canvasZoom / 100})`,
+                transformOrigin: '0 0'
+              }}
+            >
+              {selectedItemIds.map((itemId: string) => {
+                const loadingItem = canvasItems.find((i: CanvasItem) => i.id === itemId);
+                if (!loadingItem || loadingItem.type === 'path' || loadingItem.type === 'text') return null;
+                return (
+                  <div
+                    key={`loader-${itemId}`}
+                    style={{
+                      position: 'absolute',
+                      left: loadingItem.x,
+                      top: loadingItem.y,
+                      width: loadingItem.width,
+                      height: loadingItem.height,
+                    }}
+                    className="flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-md"
+                  >
+                    <Loader2 size={42} className="animate-spin text-white" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* V283 A: 섹션 레벨 selection border 오버레이 (z-105) — 로더(z-102) 위에 표시 */}
+          {selectedItemIds.length > 0 && (
+            <div
+              className="absolute inset-0 pointer-events-none z-[105]"
+              style={{
+                transform: `translate(calc(50% + ${canvasOffset.x}px), calc(50% + ${canvasOffset.y}px)) scale(${canvasZoom / 100})`,
+                transformOrigin: '0 0'
+              }}
+            >
+              {selectedItemIds.map((itemId: string) => {
+                const selItem = canvasItems.find((i: CanvasItem) => i.id === itemId);
+                if (!selItem || selItem.type === 'path' || selItem.type === 'text') return null;
+                return (
+                  <div
+                    key={`sel-border-${itemId}`}
+                    style={{
+                      position: 'absolute',
+                      left: selItem.x - 1,
+                      top: selItem.y - 1,
+                      width: selItem.width + 2,
+                      height: selItem.height + 2,
+                      borderWidth: `${1.6 / (canvasZoom / 100)}px`,
+                      borderStyle: 'solid',
+                      borderColor: '#1d4ed8',
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
+
           {/* V124: Main Artboard Area (Scaled div containing all actual items) */}
           <div
             className="absolute inset-0"
@@ -2634,9 +2742,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                 return (
                 <div
                   key={item.id}
-                  draggable={item.type === 'upload' || item.type === 'generated'}
+                  draggable={item.type === 'upload'} // V280: CHANGE VIEWPOINT(generated) 드래그 제거
                   onDragStart={(e: React.DragEvent) => {
-                    if ((item.type === 'upload' || item.type === 'generated') && item.src) {
+                    if (item.type === 'upload' && item.src) {
                       e.stopPropagation();  // V269: prevent canvas container preventDefault from cancelling drag
                       e.dataTransfer.setData('text/image-src', item.src);
                       e.dataTransfer.effectAllowed = 'copy';
@@ -2904,21 +3012,78 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
-                        {item.type === 'artboard' ? (
-                          /* V272: Artboard control bar — [Upload|Lock|Trash] */
+                        {/* V284 F / V283 C: GENERATED / VIEW 통합 툴바 — 타입 무관 [edit+|download|library|delete] */}
+                        {item.label === 'GENERATED / VIEW' ? (
                           <>
                             <button
                               onClick={() => {
-                                pendingArtboardIdRef.current = item.id;
-                                artboardFileInputRef.current?.click();
+                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
+                                  i.id === item.id
+                                    ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: 'GENERATED / VIEW' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
+                                    : i
+                                ));
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="이미지 업로드"
+                              title="편집 탭 추가"
                             >
-                              <Upload size={12 / (canvasZoom / 100)} />
+                              <Plus size={12 / (canvasZoom / 100)} />
                             </button>
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                            <a
+                              href={item.src || '#'}
+                              download="analyzed.png"
+                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                              title="다운로드"
+                            >
+                              <Download size={14 / (canvasZoom / 100)} />
+                            </a>
+                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                            <button
+                              onClick={() => setOpenLibraryItemId(openLibraryItemId === item.id ? null : item.id)}
+                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                              title="입면 전개도"
+                            >
+                              <Book size={12 / (canvasZoom / 100)} />
+                            </button>
+                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                            <button
+                              onClick={() => {
+                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
+                                setRedoStates([]);
+                                setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
+                                setSelectedItemIds([]);
+                              }}
+                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
+                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                              title="삭제"
+                            >
+                              <Trash2 size={12 / (canvasZoom / 100)} />
+                            </button>
+                          </>
+                        ) : item.type === 'artboard' ? (
+                          /* V281: Artboard control bar — [Upload|Lock|Trash] */
+                          /* 초기 업로드 기반 캔버스에만 업로드 버튼 렌더링 */
+                          <>
+                            {/* V284 F: ORIGINAL 제거 — label 없거나 SKETCH일 때만 업로드 버튼 표시 */}
+                            {(!item.label || item.label === 'SKETCH') && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    pendingArtboardIdRef.current = item.id;
+                                    artboardFileInputRef.current?.click();
+                                  }}
+                                  className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                                  title="이미지 업로드"
+                                >
+                                  <Upload size={12 / (canvasZoom / 100)} />
+                                </button>
+                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                              </>
+                            )}
                             <button
                               onClick={() => {
                                 setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
@@ -2934,6 +3099,20 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                                 : <svg width={12/(canvasZoom/100)} height={12/(canvasZoom/100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
                               }
                             </button>
+                            {/* V282 D-2: artboard ANALYZED 모체 Book 버튼 */}
+                            {item.label === 'ANALYZED' && (
+                              <>
+                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                                <button
+                                  onClick={() => setOpenLibraryItemId(openLibraryItemId === item.id ? null : item.id)}
+                                  className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                                  title="입면 전개도"
+                                >
+                                  <Book size={12 / (canvasZoom / 100)} />
+                                </button>
+                              </>
+                            )}
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
@@ -2975,7 +3154,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                                     width: item.width,
                                     height: item.height,
                                     motherId: item.id,
-                                    label: `EDIT ${String(siblings.length + 1).padStart(2, '0')}`,
+                                    // V284 B: EDIT XX label 폐기
+
                                     parameters: null
                                   };
 
@@ -3020,16 +3200,27 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           <>
                             <button
                               onClick={() => {
-                                // V276: editVersions 초기화 (패널 미오픈, Change E 폐기)
-                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
-                                  i.id === item.id
-                                    ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: i.label || 'VIEWPOINT' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
-                                    : i
-                                ));
+                                // V281: 독립된 모체로 하단 분리 복제
+                                setCanvasItems((prev: CanvasItem[]) => {
+                                  const newArtboard: CanvasItem = {
+                                    id: `artboard-vp-edit-${Date.now()}`,
+                                    type: 'artboard',
+                                    src: item.src,
+                                    x: item.x,
+                                    y: item.y + item.height + 120, // 하단 120px 패딩
+                                    width: item.width,
+                                    height: item.height,
+                                    motherId: null, // 독립된 모체 (Tree 연결 해제)
+                                    // V284 A: label 없는 독립 아트보드
+                                    parameters: null
+                                  };
+                                  setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
+                                  return [...prev, newArtboard];
+                                });
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="편집 탭 추가 (모체화)"
+                              title="독립 모체 생성"
                             >
                               <Plus size={12 / (canvasZoom / 100)} />
                             </button>
@@ -3043,17 +3234,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                             >
                               <Download size={14 / (canvasZoom / 100)} />
                             </a>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            {/* V278 B: library 버튼 */}
-                            <button
-                              onClick={() => setOpenLibraryItemId(openLibraryItemId === item.id ? null : item.id)}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="입면 전개도"
-                            >
-                              <Book size={12 / (canvasZoom / 100)} />
-                            </button>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                            {/* V281: library 버튼을 ANALYZED 뷰(원본 모체)로 이전하므로 여기선 삭제됨 */}
                             <button
                               onClick={() => {
                                 setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
@@ -3096,16 +3277,20 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                             >
                               <Download size={14 / (canvasZoom / 100)} />
                             </a>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            {/* library — 방안 3 플레이스홀더 */}
-                            <button
-                              onClick={() => alert('라이브러리 기능은 준비 중입니다.')}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="라이브러리 (준비 중)"
-                            >
-                              <Book size={12 / (canvasZoom / 100)} />
-                            </button>
+                            {/* V282 D-1: ANALYZED 모체에만 Book 버튼 표시 */}
+                            {item.label === 'ANALYZED' && (
+                              <>
+                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                                <button
+                                  onClick={() => setOpenLibraryItemId(openLibraryItemId === item.id ? null : item.id)}
+                                  className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                                  title="입면 전개도"
+                                >
+                                  <Book size={12 / (canvasZoom / 100)} />
+                                </button>
+                              </>
+                            )}
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
@@ -3255,15 +3440,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         </div>
                       )}
 
-                      {/* V156: Reverted to original white circular Loader2 */}
-                      {isGenerating && selectedItemIds.includes(item.id) && (
-                        <div className="absolute inset-0 z-[103] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
-                          <Loader2
-                            size={42}
-                            className="animate-spin text-white"
-                          />
-                        </div>
-                      )}
+                      {/* V282 B+C: 캔버스 레벨 로더로 이전 (z-102) */}
                       {/* Corner Handles (Scale Invariant Circles, 4-corner resizable) */}
                       {[
                         { top: true, left: true, dx: -1, dy: -1, cursor: 'nwse-resize' }, // top-left
