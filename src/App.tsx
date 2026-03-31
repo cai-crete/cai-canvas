@@ -2300,7 +2300,68 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-            {/* V114/V2.6: Integrated Overlay Layer for all UI helpers (Lasso, Drawing, Lines) */}
+            {/* V289 C: Connection Lines Layer moved to z-[5] below all rendering items */}
+            <div className="absolute inset-0 pointer-events-none z-[5]">
+              {(() => {
+                const rect = (canvasRef as any).current?.getBoundingClientRect() || { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+                const cx = rect.width / 2;
+                const cy = rect.height / 2;
+                const baseTransform = `translate(${canvasOffset.x + cx}px, ${canvasOffset.y + cy}px) scale(${canvasZoom / 100})`;
+
+                return (
+                  <svg key="connection-svg" className="absolute inset-0 w-full h-full" style={{ overflow: 'visible' }}>
+                    <g style={{ transform: baseTransform }}>
+                      {(() => {
+                        const cardItems = canvasItems.filter((i: CanvasItem) =>
+                          ['upload', 'artboard', 'generated', 'sketch_generated'].includes(i.type)
+                        );
+                        return cardItems
+                          .filter((child: CanvasItem) => !!child.motherId)
+                          .map((child: CanvasItem) => {
+                            const mother = cardItems.find((c: CanvasItem) => c.id === child.motherId);
+                            if (!mother) return null;
+                            
+                            // V289 A: 절대 고정 앵커
+                            const isFirstArtboard = !mother.motherId && mother.type === 'artboard';
+
+                            const startX = isFirstArtboard ? mother.x + mother.width : mother.x + mother.width / 2;
+                            const startY = isFirstArtboard ? mother.y + mother.height / 2 : mother.y + mother.height;
+
+                            const endX = isFirstArtboard ? child.x : child.x + child.width / 2;
+                            const endY = isFirstArtboard ? child.y + child.height / 2 : child.y;
+
+                            const control1X = isFirstArtboard ? startX + 50 : startX;
+                            const control1Y = isFirstArtboard ? startY : startY + 50;
+
+                            const control2X = isFirstArtboard ? endX - 50 : endX;
+                            const control2Y = isFirstArtboard ? endY : endY - 50;
+
+                            const pathD = `M ${startX} ${startY} C ${control1X} ${control1Y}, ${control2X} ${control2Y}, ${endX} ${endY}`;
+
+                            const isHighlighted = selectedItemIds.includes(mother.id) || selectedItemIds.includes(child.id);
+                            const stroke = isHighlighted
+                              ? (theme === 'dark' ? '#ffffff' : '#000000')
+                              : (theme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)');
+                            const strokeWidth = isHighlighted ? 3 : 1.5;
+                            return (
+                              <g key={`chain-${mother.id}-${child.id}`}>
+                                <path d={pathD} fill="none" stroke={stroke} strokeWidth={strokeWidth} style={{ transition: 'stroke 0.3s ease, stroke-width 0.3s ease' }} />
+                                {isHighlighted && (
+                                  <circle r="3" fill={theme === 'dark' ? '#ffffff' : '#000000'}>
+                                    <animateMotion dur="2s" repeatCount="indefinite" path={pathD} />
+                                  </circle>
+                                )}
+                              </g>
+                            );
+                          }).filter(Boolean);
+                      })()}
+                    </g>
+                  </svg>
+                );
+              })()}
+            </div>
+
+            {/* V114/V2.6: Integrated Overlay Layer for all UI helpers (Lasso, Drawing) */}
             <div className="absolute inset-0 pointer-events-none z-[100]">
               {(() => {
                 const rect = (canvasRef as any).current?.getBoundingClientRect() || { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
@@ -2379,64 +2440,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                       </g>
                     </svg>
 
-                    {/* 3. Connection Lines — V271: Bezier chain */}
-                    <svg key="connection-svg" className="absolute inset-0 w-full h-full" style={{ overflow: 'visible' }}>
-                      <g style={{ transform: baseTransform }}>
-                        {(() => {
-                          const cardItems = canvasItems.filter((i: CanvasItem) =>
-                            ['upload', 'artboard', 'generated', 'sketch_generated'].includes(i.type)
-                          );
-                          // V278 F: motherId 기반 팬아웃 연결 (순차 체인 → 트리 구조)
-                          return cardItems
-                            .filter((child: CanvasItem) => !!child.motherId)
-                            .map((child: CanvasItem) => {
-                              const mother = cardItems.find((c: CanvasItem) => c.id === child.motherId);
-                              if (!mother) return null;
-                              // V287 D: 방향 적응형 연결선 — child가 아래: 수직 베지어, child가 우측: 수평 베지어
-                              const isBelow = child.y > mother.y + mother.height / 2;
-                              let startX: number, startY: number, endX: number, endY: number, pathD: string;
-                              if (isBelow) {
-                                startX = mother.x + mother.width / 2;
-                                startY = mother.y + mother.height;
-                                endX   = child.x + child.width / 2;
-                                endY   = child.y;
-                                const cpY = startY + (endY - startY) * 0.5;
-                                pathD  = `M ${startX} ${startY} C ${startX} ${cpY} ${endX} ${cpY} ${endX} ${endY}`;
-                              } else {
-                                startX = mother.x + mother.width;
-                                startY = mother.y + mother.height / 2;
-                                endX   = child.x;
-                                endY   = child.y + child.height / 2;
-                                const cpX = startX + (endX - startX) * 0.5;
-                                pathD  = `M ${startX} ${startY} C ${cpX} ${startY} ${cpX} ${endY} ${endX} ${endY}`;
-                              }
-                              const isHighlighted =
-                                selectedItemIds.includes(mother.id) || selectedItemIds.includes(child.id);
-                              const stroke = isHighlighted
-                                ? (theme === 'dark' ? '#ffffff' : '#000000')
-                                : (theme === 'dark' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)');
-                              const strokeWidth = isHighlighted ? 3 : 1.5;
-                              return (
-                                <g key={`chain-${mother.id}-${child.id}`}>
-                                  <path
-                                    d={pathD}
-                                    fill="none"
-                                    stroke={stroke}
-                                    strokeWidth={strokeWidth}
-                                    style={{ transition: 'stroke 0.3s ease, stroke-width 0.3s ease' }}
-                                  />
-                                  {isHighlighted && (
-                                    <circle r="3" fill={theme === 'dark' ? '#ffffff' : '#000000'}>
-                                      <animateMotion dur="2s" repeatCount="indefinite" path={pathD} />
-                                    </circle>
-                                  )}
-                                </g>
-                              );
-                            })
-                            .filter(Boolean);
-                        })()}
-                      </g>
-                    </svg>
+
                   </>
                 );
               })()}
