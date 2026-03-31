@@ -2300,8 +2300,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-            {/* V289 C: Connection Lines Layer moved to z-[5] below all rendering items */}
-            <div className="absolute inset-0 pointer-events-none z-[5]">
+            {/* V292 A: Connection Lines Layer moved to z-[0] below all rendering items */}
+            <div className="absolute inset-0 pointer-events-none z-[0]">
               {(() => {
                 const rect = (canvasRef as any).current?.getBoundingClientRect() || { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
                 const cx = rect.width / 2;
@@ -3178,8 +3178,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           /* V281: Artboard control bar — [Upload|Lock|Trash] */
                           /* 초기 업로드 기반 캔버스에만 업로드 버튼 렌더링 */
                           <>
-                            {/* V284 F: ORIGINAL 제거 — label 없거나 SKETCH일 때만 업로드 버튼 표시 */}
-                            {(!item.label || item.label === 'SKETCH') && (
+                            {/* V292 B: motherId 있는 파생 아트보드는 Upload 버튼 숨김 */}
+                            {(!item.label || item.label === 'SKETCH') && !item.motherId && (
                               <>
                                 <button
                                   onClick={() => {
