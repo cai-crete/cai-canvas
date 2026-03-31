@@ -36,7 +36,14 @@
       "Bash(curl -s https://raw.githubusercontent.com/cai-crete/cai-print/main/src/constants/defaultData.ts)",
       "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/components/edges/ProtocolEdge.tsx\")",
       "Bash(curl -s \"https://raw.githubusercontent.com/cai-crete/cai-planners/main/src/App.tsx\")",
-      "Bash(curl -s \"https://api.github.com/repos/cai-crete/cai-planners/contents/src/components/edges\")"
+      "Bash(curl -s \"https://api.github.com/repos/cai-crete/cai-planners/contents/src/components/edges\")",
+      "Bash(ls \"d:\\\\OneDrive\\\\바탕 화면\\\\CRETE\\\\change-viewpoint\\\\작업지시서_V27\"*.md)",
+      "Bash(ls \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/\"*.md)",
+      "Bash(grep -n \"item.label === ''ANALYZED''\\\\|item.type === ''artboard''\\\\|V283\\\\|V282 D\" \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
+      "Bash(grep -v \"//.*ANALYZED\\\\|//.*VIEWPOINT\\\\|//.*EDIT\\\\|//.*SKETCH\")",
+      "Bash(grep -n \"item.type === ''generated''\\\\|item.type === ''sketch_generated''\\\\|generated.*toolbar\\\\|sketch_generated.*toolbar\" \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
+      "Bash(ls \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/작업지시서_V\"*.md)",
+      "Bash(grep -n \"startsWith\\(''EDIT ''\\)\\\\|label.*EDIT\\\\|EDIT.*label\" \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")"
     ]
   }
 }

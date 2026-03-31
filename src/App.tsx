@@ -1272,7 +1272,9 @@ export default function App() {
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       isTwoFingerActiveRef.current = true; // V198: Block lasso
-      previousCanvasModeRef.current = canvasMode as 'select' | 'pan'; // V199: Save mode
+      // V288 B: tempRestore 우선 참조
+      previousCanvasModeRef.current = (tempRestoreCanvasModeRef.current || canvasMode) as 'select' | 'pan' | 'pen' | 'eraser';
+      if (tempRestoreCanvasModeRef.current) tempRestoreCanvasModeRef.current = null;
       setCanvasMode('pan');
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -2036,18 +2038,31 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                       const targetMotherId = sourceItem?.id ?? null;
                       
                       setCanvasItems((prev: CanvasItem[]) => {
-                        // V287 D: 첫 결과(형제 없음) → 소스 우측, 이후(형제 있음) → 이전 형제 하단
+                        // V288 D: 최신 소스 참조로 stale closure 해결
+                        const currentSource = sourceItem ? (prev.find((i: CanvasItem) => i.id === sourceItem.id) ?? sourceItem) : null;
+                        
+                        // V288 A: 파생 아트보드 여부에 따른 첫 배치 분기
                         const newItemWidth = img.width * 0.4;
                         const newItemHeight = img.height * 0.4;
-                        let newX = sourceItem ? sourceItem.x + sourceItem.width + 120 : 0;
-                        let newY = sourceItem ? sourceItem.y : 0;
+                        let newX = currentSource ? currentSource.x + currentSource.width + 120 : 0;
+                        let newY = currentSource ? currentSource.y : 0;
 
                         if (targetMotherId) {
                           const siblings = prev.filter((c: CanvasItem) => c.motherId === targetMotherId);
+                          const isOriginal = currentSource && currentSource.type === 'artboard' && !currentSource.motherId;
+
                           if (siblings.length > 0) {
                             const bottomMost = siblings.reduce((max, cur) => cur.y > max.y ? cur : max, siblings[0]);
                             newX = bottomMost.x;
                             newY = bottomMost.y + bottomMost.height + 120;
+                          } else {
+                            if (isOriginal) {
+                              newX = currentSource.x + currentSource.width + 120;
+                              newY = currentSource.y;
+                            } else {
+                              newX = currentSource.x;
+                              newY = currentSource.y + currentSource.height + 120;
+                            }
                           }
                         }
 
@@ -2428,7 +2443,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
             </div>
 
           {/* V173/V174: Integrated Left Tool Bar Area - Now FIXED OUTSIDE Scale Layer */}
-          <div className="absolute left-[12px] top-1/2 -translate-y-1/2 z-[100] flex flex-col items-center gap-3 pointer-events-none">
+          <div className="absolute left-[12px] top-1/2 -translate-y-1/2 z-[120] flex flex-col items-center gap-3 pointer-events-none">
             {/* V266: Upload Artboard Button — 최상단 배치 */}
             <div className="flex flex-col items-center">
               <button
@@ -3223,15 +3238,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                               onClick={() => {
                                 // V279 수정: 우측 120px 패딩 복제 (Fan-out) 및 스택 제거 (기존 시스템 복구)
                                 setCanvasItems((prev: CanvasItem[]) => {
+                                  // V288 E: 항상 소스의 우측 배치
                                   let newX = item.x + item.width + 120;
                                   let newY = item.y;
-                                  
-                                  const siblings = prev.filter((c: CanvasItem) => c.motherId === item.id);
-                                  if (siblings.length > 0) {
-                                    const bottomMost = siblings.reduce((max, cur) => cur.y > max.y ? cur : max, siblings[0]);
-                                    newX = bottomMost.x;
-                                    newY = bottomMost.y + bottomMost.height + 120;
-                                  }
                                   
                                   const newArtboard: CanvasItem = {
                                     id: `artboard-edit-${Date.now()}`,
@@ -3289,15 +3298,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                             <button
                               onClick={() => {
                                 setCanvasItems((prev: CanvasItem[]) => {
-                                  // V287 F: VIEW XX 우측 배치 + 형제 스태킹 + motherId 연결
+                                  // V288 E: VIEW XX 우측 배치 (항상 소스의 우측)
                                   let newX = item.x + item.width + 120;
                                   let newY = item.y;
-                                  const siblings = prev.filter((c: CanvasItem) => c.motherId === item.id);
-                                  if (siblings.length > 0) {
-                                    const bottomMost = siblings.reduce((max, cur) => cur.y > max.y ? cur : max, siblings[0]);
-                                    newX = bottomMost.x;
-                                    newY = bottomMost.y + bottomMost.height + 120;
-                                  }
                                   const newArtboard: CanvasItem = {
                                     id: `artboard-vp-edit-${Date.now()}`,
                                     type: 'artboard',
@@ -3547,7 +3550,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
         </section>
 
         {/* RIGHT SIDEBAR WRAPPER (V177: Detached Header & Minimal Footer) */}
-        <div className="absolute top-0 right-0 h-full z-[110] pointer-events-none flex justify-end p-[12px]">
+        <div className="absolute top-0 right-0 h-full z-[120] pointer-events-none flex justify-end p-[12px]">
           <div className={`
             relative h-full transition-all duration-500 ease-in-out flex flex-col items-end
             ${isRightPanelOpen ? 'w-[284px]' : 'w-0'}
