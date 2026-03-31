@@ -2321,20 +2321,24 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                             const mother = cardItems.find((c: CanvasItem) => c.id === child.motherId);
                             if (!mother) return null;
                             
-                            // V289 A: 절대 고정 앵커
+                            // V291 A&B: 절대 가로/세로 결정 조건 확장
                             const isFirstArtboard = !mother.motherId && mother.type === 'artboard';
+                            const isEditDerived = child.type === 'artboard';
+                            const isViewpoint = child.type === 'generated';
+                            
+                            const isHorizontalConnection = isFirstArtboard || isEditDerived || isViewpoint;
 
-                            const startX = isFirstArtboard ? mother.x + mother.width : mother.x + mother.width / 2;
-                            const startY = isFirstArtboard ? mother.y + mother.height / 2 : mother.y + mother.height;
+                            const startX = isHorizontalConnection ? mother.x + mother.width : mother.x + mother.width / 2;
+                            const startY = isHorizontalConnection ? mother.y + mother.height / 2 : mother.y + mother.height;
 
-                            const endX = isFirstArtboard ? child.x : child.x + child.width / 2;
-                            const endY = isFirstArtboard ? child.y + child.height / 2 : child.y;
+                            const endX = isHorizontalConnection ? child.x : child.x + child.width / 2;
+                            const endY = isHorizontalConnection ? child.y + child.height / 2 : child.y;
 
-                            const control1X = isFirstArtboard ? startX + 50 : startX;
-                            const control1Y = isFirstArtboard ? startY : startY + 50;
+                            const control1X = isHorizontalConnection ? startX + 50 : startX;
+                            const control1Y = isHorizontalConnection ? startY : startY + 50;
 
-                            const control2X = isFirstArtboard ? endX - 50 : endX;
-                            const control2Y = isFirstArtboard ? endY : endY - 50;
+                            const control2X = isHorizontalConnection ? endX - 50 : endX;
+                            const control2Y = isHorizontalConnection ? endY : endY - 50;
 
                             const pathD = `M ${startX} ${startY} C ${control1X} ${control1Y}, ${control2X} ${control2Y}, ${endX} ${endY}`;
 
