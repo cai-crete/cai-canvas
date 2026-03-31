@@ -1406,7 +1406,7 @@ export default function App() {
 
     setSitePlanImage(analysisImage);
     setCanvasItems(prev => prev.map(i =>
-      i.id === sourceItem.id ? { ...i, label: 'GENERATED / VIEW' } : i
+      i.id === sourceItem.id ? { ...i, label: 'IMAGE / VIEW' } : i
     ));
     await analyzeViewpoint(analysisImage, sourceItem.id);
   };
@@ -1861,7 +1861,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           newGenItem.y = bottomMost.y + bottomMost.height + 96;
                         }
                         // V280: CHANGE VIEWPOINT 생성 후 모체 라벨을 ANALYZED로 덮어씌움
-                        return [...prev.map(i => i.id === sourceItem.id ? { ...i, label: 'GENERATED / VIEW' } : i), newGenItem];
+                        return [...prev.map(i => i.id === sourceItem.id ? { ...i, label: 'IMAGE / VIEW' } : i), newGenItem];
                       });
                       if (!isFirstTime) setActiveTab('result');
                       resolve();
@@ -3119,14 +3119,14 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         }}
                         onPointerDown={(e) => e.stopPropagation()}
                       >
-                        {/* V284 F / V283 C: GENERATED / VIEW 통합 툴바 — 타입 무관 [edit+|download|library|delete] */}
-                        {item.label === 'GENERATED / VIEW' ? (
+                        {/* V284 F / V283 C: IMAGE / VIEW 통합 툴바 — 타입 무관 [edit+|download|library|delete] */}
+                        {item.label === 'IMAGE / VIEW' ? (
                           <>
                             <button
                               onClick={() => {
                                 setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
                                   i.id === item.id
-                                    ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: 'GENERATED / VIEW' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
+                                    ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: 'IMAGE / VIEW' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
                                     : i
                                 ));
                               }}
