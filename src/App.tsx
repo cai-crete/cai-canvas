@@ -408,8 +408,8 @@ export default function App() {
 
   // V217: PRINT Panel States
   const [printPrompt, setPrintPrompt] = useState<string>("");
-  const [printTemplate, setPrintTemplate] = useState<string>("REPORT");
-  const [printPages, setPrintPages] = useState<number>(7);
+  const [printTemplate, setPrintTemplate] = useState<string>(""); // V287 A: 초기 미선택
+  const [printPages, setPrintPages] = useState<number>(1); // V286 C: 초기값 1
 
   // V250: Mother App Common States (Resolution & Aspect Ratio)
   const [resolution, setResolution] = useState<string>('');
@@ -901,7 +901,15 @@ export default function App() {
           currentSelection = newSelection;
           pendingToggleItemIdRef.current = null;
         } else {
-          pendingToggleItemIdRef.current = clickedItem.id;
+          // V287 B: Planners 카드 재클릭 = 상세 페이지 열기 (deselect 없음)
+          if (clickedItem.parameters?.isPlannerResult) {
+            setSelectedPlannerCardId(clickedItem.id);
+            setIsRightPanelOpen(true);
+            setSelectedFunction('PLANNERS');
+            setIsFunctionSelectorOpen(false);
+          } else {
+            pendingToggleItemIdRef.current = clickedItem.id;
+          }
         }
 
         // V141: Transition library if open
@@ -916,7 +924,8 @@ export default function App() {
           dragStartRef.current = { x: coords.x, y: coords.y };
 
           // V193: Deselect Toggle Logic Init
-          if (selectedItemIds.includes(clickedItem.id)) {
+          // V287 B: Planners 카드는 deselect 없음
+          if (selectedItemIds.includes(clickedItem.id) && !clickedItem.parameters?.isPlannerResult) {
             pendingToggleItemIdRef.current = clickedItem.id;
           }
 
@@ -958,7 +967,16 @@ export default function App() {
       setLassoPath([{ x: coords.x, y: coords.y }]);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'pen') {
-      if (e.pointerType === 'touch') return; // V267: block touch only, allow mouse+pen
+      if (e.pointerType === 'touch') {
+        // V286 A: 손가락 터치 → 임시 pan (tempRestoreCanvasModeRef 활용, pointerUp에서 자동 복귀)
+        tempRestoreCanvasModeRef.current = 'pen';
+        setCanvasMode('pan');
+        isDraggingPanRef.current = true;
+        setIsDraggingPan(true);
+        dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
       // V257 C-10: Block drawing outside drawable item bounds
       const drawTarget = canvasItems.find((item: CanvasItem) =>
         (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
@@ -979,7 +997,16 @@ export default function App() {
       setCurrentStroke([coords]);
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'eraser') {
-      if (e.pointerType === 'touch') return; // V267: block touch only, allow mouse+pen
+      if (e.pointerType === 'touch') {
+        // V286 B: 손가락 터치 → 임시 pan (tempRestoreCanvasModeRef 활용, pointerUp에서 자동 복귀)
+        tempRestoreCanvasModeRef.current = 'eraser';
+        setCanvasMode('pan');
+        isDraggingPanRef.current = true;
+        setIsDraggingPan(true);
+        dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
       // V254: drag-based partial erase for paths (Q1: only paths, images/text ignored)
       // V257 C-10: Block erasing outside drawable item bounds
       const eraseTarget = canvasItems.find((item: CanvasItem) =>
@@ -2009,9 +2036,12 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                       const targetMotherId = sourceItem?.id ?? null;
                       
                       setCanvasItems((prev: CanvasItem[]) => {
+                        // V287 D: 첫 결과(형제 없음) → 소스 우측, 이후(형제 있음) → 이전 형제 하단
+                        const newItemWidth = img.width * 0.4;
+                        const newItemHeight = img.height * 0.4;
                         let newX = sourceItem ? sourceItem.x + sourceItem.width + 120 : 0;
                         let newY = sourceItem ? sourceItem.y : 0;
-                        
+
                         if (targetMotherId) {
                           const siblings = prev.filter((c: CanvasItem) => c.motherId === targetMotherId);
                           if (siblings.length > 0) {
@@ -2020,9 +2050,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                             newY = bottomMost.y + bottomMost.height + 120;
                           }
                         }
-                        
-                        // V284 C: EDITED XX label 폐기 — 항상 GENERATED
-                        const genLabel = 'GENERATED';
+
+                        // V287 E: GENERATED → IMAGE
+                        const genLabel = 'IMAGE';
 
                         const newGenItem: CanvasItem = {
                           id: `sketch-${Date.now()}`,
@@ -2030,8 +2060,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           src: generatedSrc,
                           x: newX,
                           y: newY,
-                          width: img.width * 0.4,
-                          height: img.height * 0.4,
+                          width: newItemWidth,
+                          height: newItemHeight,
                           motherId: targetMotherId,
                           label: genLabel, // V280: 동적 네이밍 규칙 적용
                           parameters: {
@@ -2347,12 +2377,24 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                             .map((child: CanvasItem) => {
                               const mother = cardItems.find((c: CanvasItem) => c.id === child.motherId);
                               if (!mother) return null;
-                              const startX = mother.x + mother.width;
-                              const startY = mother.y + mother.height / 2;
-                              const endX   = child.x;
-                              const endY   = child.y + child.height / 2;
-                              const cpX    = startX + (endX - startX) * 0.5;
-                              const pathD  = `M ${startX} ${startY} C ${cpX} ${startY} ${cpX} ${endY} ${endX} ${endY}`;
+                              // V287 D: 방향 적응형 연결선 — child가 아래: 수직 베지어, child가 우측: 수평 베지어
+                              const isBelow = child.y > mother.y + mother.height / 2;
+                              let startX: number, startY: number, endX: number, endY: number, pathD: string;
+                              if (isBelow) {
+                                startX = mother.x + mother.width / 2;
+                                startY = mother.y + mother.height;
+                                endX   = child.x + child.width / 2;
+                                endY   = child.y;
+                                const cpY = startY + (endY - startY) * 0.5;
+                                pathD  = `M ${startX} ${startY} C ${startX} ${cpY} ${endX} ${cpY} ${endX} ${endY}`;
+                              } else {
+                                startX = mother.x + mother.width;
+                                startY = mother.y + mother.height / 2;
+                                endX   = child.x;
+                                endY   = child.y + child.height / 2;
+                                const cpX = startX + (endX - startX) * 0.5;
+                                pathD  = `M ${startX} ${startY} C ${cpX} ${startY} ${cpX} ${endY} ${endX} ${endY}`;
+                              }
                               const isHighlighted =
                                 selectedItemIds.includes(mother.id) || selectedItemIds.includes(child.id);
                               const stroke = isHighlighted
@@ -2471,7 +2513,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                 {showStrokePanel === 'pen' && (
                   <div
                     className="absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 flex items-center h-8 px-0.5 gap-0.5 bg-white/90 dark:bg-black/90 border border-black/10 dark:border-white/10 rounded-full backdrop-blur-sm pointer-events-auto"
-                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)', animation: 'slideInRight 0.15s ease-out' }}
+                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }} /* V287 C: 애니메이션 제거 */
                   >
                     {([1, 2, 4, 6, 8] as const).map(size => (
                       <button
@@ -2529,7 +2571,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                 {showStrokePanel === 'eraser' && (
                   <div
                     className="absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 flex items-center h-8 px-0.5 gap-0.5 bg-white/90 dark:bg-black/90 border border-black/10 dark:border-white/10 rounded-full backdrop-blur-sm pointer-events-auto"
-                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)', animation: 'slideInRight 0.15s ease-out' }}
+                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }} /* V287 C: 애니메이션 제거 */
                   >
                     {([2, 4, 6, 8, 10] as const).map(size => (
                       <button
@@ -2670,7 +2712,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
             >
               {selectedItemIds.map((itemId: string) => {
                 const selItem = canvasItems.find((i: CanvasItem) => i.id === itemId);
-                if (!selItem || selItem.type === 'path' || selItem.type === 'text') return null;
+                // V287 B: isPlannerResult 카드는 text 타입이어도 border 표시
+                if (!selItem || selItem.type === 'path' || (selItem.type === 'text' && !selItem.parameters?.isPlannerResult)) return null;
                 return (
                   <div
                     key={`sel-border-${itemId}`}
@@ -2689,6 +2732,51 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
               })}
             </div>
           )}
+
+          {/* V285 C: 섹션 레벨 리사이즈 핸들 오버레이 (z-115) — 모든 오버레이 위 */}
+          {selectedItemIds.length === 1 && (() => {
+            const resItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
+            if (!resItem || resItem.type === 'path' || resItem.type === 'text' || resItem.isLocked) return null;
+            const s = 1 / (canvasZoom / 100);
+            const size = 12 * s;
+            return (
+              <div
+                className="absolute inset-0 pointer-events-none z-[115]"
+                style={{
+                  transform: `translate(calc(50% + ${canvasOffset.x}px), calc(50% + ${canvasOffset.y}px)) scale(${canvasZoom / 100})`,
+                  transformOrigin: '0 0'
+                }}
+              >
+                {[
+                  { dx: -1, dy: -1, cursor: 'nwse-resize', x: resItem.x - size / 2, y: resItem.y - size / 2 },
+                  { dx:  1, dy: -1, cursor: 'nesw-resize', x: resItem.x + resItem.width - size / 2, y: resItem.y - size / 2 },
+                  { dx: -1, dy:  1, cursor: 'nesw-resize', x: resItem.x - size / 2, y: resItem.y + resItem.height - size / 2 },
+                  { dx:  1, dy:  1, cursor: 'nwse-resize', x: resItem.x + resItem.width - size / 2, y: resItem.y + resItem.height - size / 2 },
+                ].map((pos, idx) => (
+                  <div
+                    key={`rh-${idx}`}
+                    className="resize-handle"
+                    data-dx={pos.dx}
+                    data-dy={pos.dy}
+                    style={{
+                      position: 'absolute',
+                      left: pos.x,
+                      top: pos.y,
+                      width: size,
+                      height: size,
+                      borderWidth: 1.6 * s,
+                      borderStyle: 'solid',
+                      backgroundColor: 'white',
+                      borderColor: '#808080',
+                      borderRadius: '999px',
+                      pointerEvents: 'auto',
+                      cursor: pos.cursor,
+                    }}
+                  />
+                ))}
+              </div>
+            );
+          })()}
 
           {/* V124: Main Artboard Area (Scaled div containing all actual items) */}
           <div
@@ -3200,17 +3288,25 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                           <>
                             <button
                               onClick={() => {
-                                // V281: 독립된 모체로 하단 분리 복제
                                 setCanvasItems((prev: CanvasItem[]) => {
+                                  // V287 F: VIEW XX 우측 배치 + 형제 스태킹 + motherId 연결
+                                  let newX = item.x + item.width + 120;
+                                  let newY = item.y;
+                                  const siblings = prev.filter((c: CanvasItem) => c.motherId === item.id);
+                                  if (siblings.length > 0) {
+                                    const bottomMost = siblings.reduce((max, cur) => cur.y > max.y ? cur : max, siblings[0]);
+                                    newX = bottomMost.x;
+                                    newY = bottomMost.y + bottomMost.height + 120;
+                                  }
                                   const newArtboard: CanvasItem = {
                                     id: `artboard-vp-edit-${Date.now()}`,
                                     type: 'artboard',
                                     src: item.src,
-                                    x: item.x,
-                                    y: item.y + item.height + 120, // 하단 120px 패딩
+                                    x: newX,
+                                    y: newY,
                                     width: item.width,
                                     height: item.height,
-                                    motherId: null, // 독립된 모체 (Tree 연결 해제)
+                                    motherId: item.id, // V287 F: VIEW XX에 연결 (연결선 생성)
                                     // V284 A: label 없는 독립 아트보드
                                     parameters: null
                                   };
@@ -3441,33 +3537,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                       )}
 
                       {/* V282 B+C: 캔버스 레벨 로더로 이전 (z-102) */}
-                      {/* Corner Handles (Scale Invariant Circles, 4-corner resizable) */}
-                      {[
-                        { top: true, left: true, dx: -1, dy: -1, cursor: 'nwse-resize' }, // top-left
-                        { top: true, right: true, dx: 1, dy: -1, cursor: 'nesw-resize' }, // top-right
-                        { bottom: true, left: true, dx: -1, dy: 1, cursor: 'nesw-resize' }, // bottom-left
-                        { bottom: true, right: true, dx: 1, dy: 1, cursor: 'nwse-resize' }, // bottom-right
-                      ].map((pos, idx) => {
-                        const s = 1 / (canvasZoom / 100);
-                        const size = 12 * s;
-                        const style: any = {
-                          width: size,
-                          height: size,
-                          borderWidth: 1.6 * s,
-                          position: 'absolute',
-                          zIndex: 110,
-                          backgroundColor: 'white',
-                          borderColor: '#808080',
-                          borderRadius: '999px',
-                          top: pos.top ? -size / 2 : 'auto',
-                          bottom: pos.bottom ? -size / 2 : 'auto',
-                          left: pos.left ? -size / 2 : 'auto',
-                          right: pos.right ? -size / 2 : 'auto',
-                          pointerEvents: 'auto',
-                          cursor: pos.cursor,
-                        };
-                        return <div key={idx} className="resize-handle" data-dx={pos.dx} data-dy={pos.dy} style={style} />;
-                      })}
+                      {/* V285 C-2: 리사이즈 핸들 섹션 레벨 오버레이(z-115)로 이전 — 여기선 제거 */}
                     </div>
                   )}
                 </div>
@@ -3523,18 +3593,24 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                 <button
                   key={fn}
                   onClick={() => {
-                    setSelectedFunction(fn);
-                    setIsFunctionSelectorOpen(false);
-                    // V276/V278: CHANGE VIEWPOINT → ANALYZE 자동 트리거 (재분석 방지)
-                    if (fn === 'CHANGE VIEWPOINT') {
-                      const sourceItem = canvasItems.find(
-                        (i: CanvasItem) => i.id === selectedItemIds[0]
-                      );
-                      if (!sourceItem?.src) {
-                        setToastMessage('분석할 이미지를 먼저 선택해주세요.');
+                    // V285 B: SKETCH TO IMAGE — 미선택 가드
+                    if (fn === 'SKETCH TO IMAGE') {
+                      if (selectedItemIds.length === 0) {
+                        setToastMessage('스케치를 먼저 선택해주세요.');
                         setTimeout(() => setToastMessage(''), 3000);
                         return;
                       }
+                    }
+                    // V285 A: CHANGE VIEWPOINT — 미선택 가드 (setSelectedFunction 전에 검사)
+                    if (fn === 'CHANGE VIEWPOINT') {
+                      const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
+                      if (!sourceItem?.src) {
+                        setToastMessage('이미지를 먼저 선택해주세요.');
+                        setTimeout(() => setToastMessage(''), 3000);
+                        return;
+                      }
+                      setSelectedFunction(fn);
+                      setIsFunctionSelectorOpen(false);
                       // V278: 이미 분석된 경우 기존 상태 복원, 재분석 스킵
                       if (sourceItem.parameters?.analyzedOpticalParams) {
                         setAnalyzedOpticalParams(sourceItem.parameters.analyzedOpticalParams);
@@ -3545,7 +3621,10 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                         return;
                       }
                       handleAnalyze();
+                      return;
                     }
+                    setSelectedFunction(fn);
+                    setIsFunctionSelectorOpen(false);
                   }}
                   className="h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto"
                 >
@@ -4154,7 +4233,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${cvPrompt.trim() ? 
                     <div className="px-4 pb-2 pt-5 shrink-0">
                       <button
                         onClick={handleGenerate}
-                        disabled={isGenerating}
+                        disabled={isGenerating || !printTemplate} // V286 D: TEMPLATE 미선택 시 비활성화
                         className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
                       >
                         <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
