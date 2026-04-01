@@ -157,28 +157,9 @@ const cropElevationFromSheet = (sheetDataUrl: string, slot: { row: number; col: 
 };
 
 
-// --- Vector / Arc Helpers ---
-function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
-  const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
-  return {
-    x: centerX + (radius * Math.cos(angleInRadians)),
-    y: centerY + (radius * Math.sin(angleInRadians))
-  };
-}
-
-function describeArc(x: number, y: number, radius: number, startAngle: number, endAngle: number) {
-  const start = polarToCartesian(x, y, radius, endAngle);
-  const end = polarToCartesian(x, y, radius, startAngle);
-  const largeArcFlag = endAngle - startAngle <= 180 ? "0" : "1";
-  return [
-    "M", start.x, start.y,
-    "A", radius, radius, 0, largeArcFlag, 0, end.x, end.y
-  ].join(" ");
-}
-
 // --- Site Plan Diagram Component ---
 // V272: onImageDrop / drag&drop / upload 제거
-const SitePlanDiagram = ({ angle, lens, isAnalyzing, analysisStep, visibleV0Index }: { angle: string, lens: number, isAnalyzing: boolean, analysisStep: string, visibleV0Index?: number | null }) => {
+const SitePlanDiagram = ({ angle, isAnalyzing, analysisStep }: { angle: string, lens: number, isAnalyzing: boolean, analysisStep: string }) => {
   // Map angle string to degrees (06:00 = 180deg, 12:00 = 0deg, etc.)
   const angleMap: Record<string, number> = {
     '12:00': 0, '1:30': 45, '3:00': 90, '04:30': 135,
@@ -226,22 +207,6 @@ const SitePlanDiagram = ({ angle, lens, isAnalyzing, analysisStep, visibleV0Inde
           strokeDasharray="8 4"
           className="text-black/30 dark:text-white/30"
         />
-
-        {/* V305: Visible Area Arc (±45 deg = 90 deg range) */}
-        {visibleV0Index != null && (
-          <path
-            d={describeArc(
-              cx, cy, radius,
-              angleMap[ANGLES[Math.max(0, visibleV0Index - 1)]],
-              angleMap[ANGLES[Math.min(ANGLES.length - 1, visibleV0Index + 1)]]
-            )}
-            fill="none"
-            stroke="black"
-            className="dark:stroke-white"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
-        )}
 
         {/* Camera Pictogram / Dot */}
         <g transform={`translate(${cameraX}, ${cameraY}) rotate(${rotation})`}>
@@ -340,18 +305,7 @@ interface CanvasItem {
 
 export default function App() {
   // --- State ---
-  const [canvasItems, setCanvasItems] = useState<CanvasItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('crete_canvasItems');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    localStorage.setItem('crete_canvasItems', JSON.stringify(canvasItems));
-  }, [canvasItems]);
+  const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const selectedItemIdsRef = useRef<string[]>([]);
   const [isLassoing, setIsLassoing] = useState(false);
@@ -883,17 +837,6 @@ export default function App() {
     // V201-2: Stylus (pen) unblock - reset two-finger flag on pen input
     if (e.pointerType === 'pen') isTwoFingerActiveRef.current = false;
 
-    // V306: 생성/분석 중 선택 락업 (빈 캔버스 및 다른 아이템 클릭 시 선택 해제 방지)
-    if (isGenerating || isAnalyzing) {
-      if (canvasMode === 'pan' || canvasMode === 'select') {
-        isDraggingPanRef.current = true;
-        setIsDraggingPan(true);
-        dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
-        e.currentTarget.setPointerCapture(e.pointerId);
-      }
-      return;
-    }
-
     const coords = getCanvasCoords(e.clientX, e.clientY);
 
     if (canvasMode === 'pan') {
@@ -1017,9 +960,6 @@ export default function App() {
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
     setOpenLibraryItemId(null);
-    // V306: 패널 전체 닫기가 아닌 초기(SELECT TOOLS) 상태로 복귀
-    setIsRightPanelOpen(true);
-    setIsFunctionSelectorOpen(true);
 
     if (canvasMode === 'lasso') {
       if (e.pointerType === 'touch') return; // V267: block touch only, allow mouse+pen
@@ -1473,7 +1413,6 @@ export default function App() {
           ]
         }
       });
-      if (abortControllerRef.current?.signal.aborted) return;
       buildingDescription = descResult.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } catch (descErr) {
       console.warn('[V297 D] Phase 0 묘사 호출 실패, 묘사 없이 진행', descErr);
@@ -1557,7 +1496,6 @@ export default function App() {
             ],
           },
         });
-        if (abortControllerRef.current?.signal.aborted) return null;
 
         const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
         const jsonStr = responseText.match(/\{[\s\S]*\}/)?.[0];
@@ -1630,30 +1568,24 @@ export default function App() {
       return analysisResult; // V257: return params for handleGenerate
 
     } catch (err) {
-      if (abortControllerRef.current?.signal.aborted) return null;
       console.warn("Analysis failed completely, using defaults", err);
       alert("분석 API 호출이 실패하거나 할당량(Quota)을 초과했습니다. 기본값으로 세팅됩니다.");
       return null;
     } finally {
-      if (!abortControllerRef.current?.signal.aborted) {
-        setIsAnalyzing(false);
-        setAnalysisStep(''); // V155: 메시지 초기화
-      }
+      setIsAnalyzing(false);
+      setAnalysisStep(''); // V155: 메시지 초기화
     }
   };
 
 
-  const generateElevations = async (base64Image: string, extractedParams?: any, itemId?: string, buildingDescription: string = '') => { // V300 A: base64Image 복원
+  const generateElevations = async (_base64Image: string, extractedParams?: any, itemId?: string, buildingDescription: string = '') => { // V297 F-1 / V299 C-1: _base64Image 미사용 (소스 이미지 미제공)
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "BIM Lock-on Active";
 
       setAnalysisStep('기하학 절대 객체 락온 중...');
 
-      // V300 A: base64Data/mimeType 복원
-      const base64Data = base64Image.split(',')[1];
-      const mimeType = base64Image.split(';')[0].split(':')[1];
-
+      // V299 C-1: base64Data/mimeType 제거 (소스 이미지 미제공)
       // V2.2: New Sequence (Front -> Top -> Right -> Left -> Rear)
       const viewConfigs = [
         { key: 'front', label: 'FRONT', angle: '06:00', az: 0, alt: 0, normal: '0, -1, 0' },
@@ -1663,8 +1595,42 @@ export default function App() {
         { key: 'rear', label: 'REAR', angle: '12:00', az: 180, alt: 0, normal: '0, 1, 0' }
       ];
 
-      // Helper — API 결과에서 이미지 추출
-      const extractImage = (result: any): string | null => {
+      const generateOne = async (config: typeof viewConfigs[0]) => {
+        // V297 F-3: buildingDescription 블록 추가
+        const descBlock = buildingDescription
+          ? `\n[SOURCE IMAGE DESCRIPTION]\n${buildingDescription}\n`
+          : '';
+
+        const prompt = `
+          [Protocol B: Visualization Execution Engine v2.2]
+
+          TASK: Deterministic Rendering of the building's ${config.label} Orthographic View.
+          CONTEXT: [ensemble_pair AEPS-v4] ${contextualParamsStr}
+          ${descBlock}
+          [PHASE 1: GEOMETRY MASTER LOCKING — ANGLE IS ABSOLUTE]
+          CRITICAL: You MUST render the building as viewed from Azimuth ${config.az}° (${config.label} face).
+          Do NOT default to any other angle. The clock-face position is ${config.angle} — this is NON-NEGOTIABLE.
+          - View: ${config.label} (Angle: ${config.angle}, Axis: ${config.normal})
+          - Camera: Azimuth ${config.az}, Altitude ${config.alt}, Orthographic Projection (FOV=0).
+          
+          [PHASE 2: PROPERTY SLAVE INJECTION]
+          - Texture Override: Cast Albedo/PBR/IOR/Aging from Source to all surfaces.
+          - Global Illumination: Fixed GI Matrix for consistent shadows across 5 views.
+          
+          CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
+        `.trim();
+
+        // V299 C-1: 소스 이미지 미제공 — 시각적 앵커 차단, 텍스트 각도 지시 강제
+        const result = await ai.models.generateContent({
+          model: IMAGE_GEN,
+          contents: {
+            parts: [
+              { text: prompt },
+            ],
+          },
+          config: { temperature: 0.4 }
+        });
+
         if (result.candidates?.[0]?.content?.parts) {
           for (const part of result.candidates[0].content.parts) {
             if (part.inlineData) {
@@ -1675,69 +1641,7 @@ export default function App() {
         return null;
       };
 
-      // V302 B: Modality strict separation (Filtering out Geometry)
-      let onlyPropertyParamsStr = "BIM Property Lock-on Active";
-      if (extractedParams) {
-        // extractedParams.elevationParams가 존재할 경우 타켓팅
-        const targetObj = extractedParams.elevationParams || extractedParams;
-        const propertiesOnly: Record<string, any> = {};
-        for (const [key, value] of Object.entries(targetObj)) {
-          // '2_Property' 또는 'material'을 포함하는 키만 추출 (1_Geometry 등은 제외)
-          if (key.includes('2_') || key.toLowerCase().includes('property') || key.toLowerCase().includes('material')) {
-            propertiesOnly[key] = value;
-          }
-        }
-        if (Object.keys(propertiesOnly).length > 0) {
-          onlyPropertyParamsStr = JSON.stringify(propertiesOnly);
-        } else {
-          onlyPropertyParamsStr = JSON.stringify(targetObj); // Fallback: 패턴 매칭 실패시 전체 주입
-        }
-      }
-
-      // V302 A: Restore Parallel Generation & Independent Internal 3D Execution
-      setAnalysisStep('Protocol B 결정론적 파이프라인 병렬 렌더링 중...');
-      
-      const generateOne = async (config: typeof viewConfigs[0]) => {
-        const descBlock = buildingDescription
-          ? `\n[SOURCE IMAGE DESCRIPTION]\n${buildingDescription}\n`
-          : '';
-
-        // V302 C: Protocol B Prompt - Dictating Internal 3D Whitebox extraction
-        const prompt = `
-[PROTOCOL B: Visualization Execution Engine v2.2]
-TASK: Deterministic Projection of the building's ${config.label} Orthographic View.
-${descBlock}
-[PHASE 1: GEOMETRY MASTER LOCKING (Image Prompt Execution)]
-1. Analyze the attached SOURCE IMAGE. Internally construct a rigid 3D Whitebox of its bounding volume.
-2. Re-project this 3D Whitebox strictly constrained to the Absolute Camera Vector: 
-   - Azimuth: ${config.az}°
-   - Altitude: ${config.alt}°
-   - Normal Vector: ${config.normal}
-CRITICAL FOR TOP VIEW (Alt 90): You MUST look strictly down upon the roof. Do NOT project the front facade. This is an absolute geometric constraint.
-
-[PHASE 2: PROPERTY SLAVE INJECTION (Text Prompt Execution)]
-- Texture & Material Guidelines:
-${onlyPropertyParamsStr}
--> Cast these surface properties onto the re-projected 3D geometry.
-- Constraint: Apply materials ONLY. Do not alter the Phase 1 geometric projection.
-
-CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
-        `.trim();
-
-        const result = await ai.models.generateContent({
-          model: IMAGE_GEN,
-          contents: {
-            parts: [
-              { inlineData: { data: base64Data, mimeType: mimeType } }, // 1_Geometry_MASTER anchor
-              { text: prompt }, // 2_Property_SLAVE anchor
-            ],
-          },
-          config: { temperature: 0.1, topK: 1 } // Protocol standard
-        });
-        return extractImage(result);
-      };
-
-      // V302 A: Execute 5 views simultaneously (DAG model)
+      // Generate all 4 views in parallel
       const results = await Promise.all(viewConfigs.map(config => generateOne(config)));
 
       const newImages = {
@@ -2458,11 +2362,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
+      setIsGenerating(false);
+      console.log("[V157] Generation canceled by user.");
     }
-    setIsGenerating(false);
-    setIsAnalyzing(false);
-    setAnalysisStep('');
-    console.log("[V157] Generation canceled by user.");
   };
 
   const currentSourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : (canvasItems.length > 0 ? canvasItems[0] : null);
@@ -2913,10 +2815,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
               {selectedItemIds.map((itemId: string) => {
                 const loadingItem = canvasItems.find((i: CanvasItem) => i.id === itemId);
                 if (!loadingItem || loadingItem.type === 'path' || loadingItem.type === 'text') return null;
-
-                // V307: 줌 배율 30% 이하일 때 전체 히든
-                if (canvasZoom <= 30) return null;
-
                 return (
                   <div
                     key={`loader-${itemId}`}
@@ -2927,29 +2825,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                       width: loadingItem.width,
                       height: loadingItem.height,
                     }}
-                    className="flex flex-col items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-md pointer-events-auto"
+                    className="flex items-center justify-center bg-white/50 dark:bg-black/50 backdrop-blur-md"
                   >
-                    {/* V307: 줌 배율 역보정 적용 및 검은색 변경 */}
-                    <Loader2 
-                      size={42 / Math.max(0.1, canvasZoom / 100)} 
-                      className="animate-spin text-black" 
-                      style={{ marginBottom: `${12 / Math.max(0.1, canvasZoom / 100)}px` }}
-                    />
-                    {(isGenerating || isAnalyzing) && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleCancelGenerate(); }}
-                        className="rounded-full bg-black text-white dark:bg-white dark:text-black font-mono tracking-widest hover:opacity-80 transition-opacity"
-                        style={{
-                          fontSize: `${15 / Math.max(0.1, canvasZoom / 100)}px`,
-                          paddingTop: `${3 / Math.max(0.1, canvasZoom / 100)}px`,
-                          paddingBottom: `${3 / Math.max(0.1, canvasZoom / 100)}px`,
-                          paddingLeft: `${6 / Math.max(0.1, canvasZoom / 100)}px`,
-                          paddingRight: `${6 / Math.max(0.1, canvasZoom / 100)}px`,
-                        }}
-                      >
-                        CANCEL
-                      </button>
-                    )}
+                    <Loader2 size={42} className="animate-spin text-white" />
                   </div>
                 );
               })}
@@ -3532,22 +3410,30 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                           <>
                             <button
                               onClick={() => {
-                                // V306: 독립 모체화 (제자리 교체)
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
-                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) => {
-                                  if (i.id === item.id) {
-                                    return {
-                                      ...i,
-                                      type: 'upload', // 새로운 독립 모체로 승격
-                                      motherId: null,
-                                      editVersions: [{ src: i.src!, label: i.label || 'ORIGINAL' }],
-                                      activeVersionIndex: 0,
-                                      parameters: null // 기존 분석값 초기화하여 재분석 유도
-                                    };
-                                  }
-                                  return i;
-                                }));
+                                // V279 수정: 우측 120px 패딩 복제 (Fan-out) 및 스택 제거 (기존 시스템 복구)
+                                setCanvasItems((prev: CanvasItem[]) => {
+                                  // V288 E: 항상 소스의 우측 배치
+                                  let newX = item.x + item.width + 120;
+                                  let newY = item.y;
+                                  
+                                  const newArtboard: CanvasItem = {
+                                    id: `artboard-edit-${Date.now()}`,
+                                    type: 'artboard',
+                                    src: item.src,
+                                    x: newX,
+                                    y: newY,
+                                    width: item.width,
+                                    height: item.height,
+                                    motherId: item.id,
+                                    // V284 B: EDIT XX label 폐기
+
+                                    parameters: null
+                                  };
+
+                                  setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
+                                  // V279: 스택 로직(childArtboardIds) 제외하고 단순 아이템 추가로 복구
+                                  return [...prev, newArtboard];
+                                });
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
@@ -3585,22 +3471,25 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                           <>
                             <button
                               onClick={() => {
-                                // V304: 모체 이미지를 우측에 추가하지 않고, 모체 위치에서 현재 파생 이미지로 대체
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
-                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) => {
-                                  if (i.id === item.motherId) {
-                                    // 모체 발견 시 현재 파생 이미지의 src와 파라미터로 완전 대체
-                                    return {
-                                      ...i,
-                                      src: item.src,
-                                      label: i.label, // 모체의 label/역할은 유지
-                                      parameters: { ...(i.parameters || {}), ...(item.parameters || {}) },
-                                    };
-                                  }
-                                  return i;
-                                }).filter((i: CanvasItem) => i.id !== item.id)); // 파생 이미지 자신은 제거
-                                setSelectedItemIds([]);
+                                setCanvasItems((prev: CanvasItem[]) => {
+                                  // V288 E: VIEW XX 우측 배치 (항상 소스의 우측)
+                                  let newX = item.x + item.width + 120;
+                                  let newY = item.y;
+                                  const newArtboard: CanvasItem = {
+                                    id: `artboard-vp-edit-${Date.now()}`,
+                                    type: 'artboard',
+                                    src: item.src,
+                                    x: newX,
+                                    y: newY,
+                                    width: item.width,
+                                    height: item.height,
+                                    motherId: item.id, // V287 F: VIEW XX에 연결 (연결선 생성)
+                                    // V284 A: label 없는 독립 아트보드
+                                    parameters: null
+                                  };
+                                  setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
+                                  return [...prev, newArtboard];
+                                });
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
@@ -3841,7 +3730,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
           <div className={`
             relative h-full transition-all duration-500 ease-in-out flex flex-col items-end
             ${isRightPanelOpen ? 'w-[284px]' : 'w-0'}
-            ${(isGenerating || isAnalyzing) ? 'opacity-50 [&_*]:!pointer-events-none' : ''}
           `}>
 
             {/* V203: Detached Header Row - Function Selector Button + PanelLeft */}
@@ -3880,7 +3768,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                 ? 'max-h-[500px] opacity-100 mb-[12px] translate-y-0'
                 : 'max-h-0 opacity-0 mb-0 -translate-y-4 pointer-events-none'}
             `}>
-              {['PLANNERS', 'SKETCH TO IMAGE', 'IMAGE TO ELEVATION', 'CHANGE VIEWPOINT', 'PRINT'].map(fn => (
+              {['PLANNERS', 'SKETCH TO IMAGE', 'CHANGE VIEWPOINT', 'PRINT'].map(fn => (
                 <button
                   key={fn}
                   onClick={() => {
@@ -3892,6 +3780,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                         return;
                       }
                     }
+                    // V285 A: CHANGE VIEWPOINT — 미선택 가드 (setSelectedFunction 전에 검사)
                     if (fn === 'CHANGE VIEWPOINT') {
                       const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
                       if (!sourceItem?.src) {
@@ -3899,37 +3788,17 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                         setTimeout(() => setToastMessage(''), 3000);
                         return;
                       }
-                      // V304: PHASE 3 전담 — 기존 분석 파라미터 복원만 수행 (handleAnalyze 제거)
+                      setSelectedFunction(fn);
+                      setIsFunctionSelectorOpen(false);
+                      // V278: 이미 분석된 경우 기존 상태 복원, 재분석 스킵
                       if (sourceItem.parameters?.analyzedOpticalParams) {
-                        setSelectedFunction(fn);
-                        setIsFunctionSelectorOpen(false);
-                        setIsRightPanelOpen(true);
                         setAnalyzedOpticalParams(sourceItem.parameters.analyzedOpticalParams);
                         setElevationParams(sourceItem.parameters.elevationParams || null);
                         setSitePlanImage(sourceItem.parameters.sitePlanImage || null);
                         setElevationImages(sourceItem.parameters.elevationImages || null);
                         setCvPrompt(sourceItem.parameters.cvPrompt || '');
-                        // V304: V0를 UI 슬라이더에 표시
-                        if (sourceItem.parameters.angleIndex !== undefined) setAngleIndex(sourceItem.parameters.angleIndex);
-                        if (sourceItem.parameters.altitudeIndex !== undefined) setAltitudeIndex(sourceItem.parameters.altitudeIndex);
-                        if (sourceItem.parameters.lensIndex !== undefined) setLensIndex(sourceItem.parameters.lensIndex);
-                        if (sourceItem.parameters.timeIndex !== undefined) setTimeIndex(sourceItem.parameters.timeIndex);
-                      } else {
-                        // V305: 파라미터 없을 때 패널 열림 차단 (return 처리)
-                        setToastMessage('먼저 IMAGE TO ELEVATION을 실행해 분석하세요.');
-                        setTimeout(() => setToastMessage(''), 3500);
-                      }
-                      return;
-                    }
-                    // V304 A: IMAGE TO ELEVATION — 미선택 가드 및 즉시 실행
-                    if (fn === 'IMAGE TO ELEVATION') {
-                      const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                      if (!sourceItem?.src) {
-                        setToastMessage('이미지를 먼저 선택해주세요.');
-                        setTimeout(() => setToastMessage(''), 3000);
                         return;
                       }
-                      // V306: 패널 변경 없이 백그라운드 5면도 실행
                       handleAnalyze();
                       return;
                     }
@@ -3951,61 +3820,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
 
             {/* V209: Shared panel container for all function panels */}
             <div className="flex-1 relative w-[284px]">
-
-              {/* V304 IMAGE TO ELEVATION Panel */}
-              <div className={`
-                absolute inset-0 transition-all duration-500 ease-in-out
-                ${!isRightPanelOpen
-                  ? 'translate-x-10 opacity-0 pointer-events-none'
-                  : (isFunctionSelectorOpen || selectedFunction !== 'IMAGE TO ELEVATION')
-                    ? 'translate-y-10 opacity-0 pointer-events-none'
-                    : 'translate-0 opacity-100 pointer-events-auto'}
-              `}>
-                <aside className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10">
-                  <div className="flex flex-col h-full">
-                    <div className="flex-1 overflow-y-auto px-4 pb-4 pt-4 min-h-0 flex flex-col gap-4 custom-scrollbar">
-                      <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Image to Elevation</span>
-
-                      {isAnalyzing ? (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-3 opacity-60">
-                          <Loader2 size={28} className="animate-spin" />
-                          <p className="font-mono text-xs text-center">{analysisStep || 'ANALYZING...'}</p>
-                        </div>
-                      ) : elevationImages ? (
-                        /* 결과 미리보기: 5면도 썸네일 그리드 */
-                        <div className="flex flex-col gap-3">
-                          <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Elevation Sheet Generated</span>
-                          <div className="grid grid-cols-2 gap-2">
-                            {(['front', 'rear', 'left', 'right', 'top'] as const).map((key) => {
-                              const src = elevationImages[key as keyof typeof elevationImages];
-                              return (
-                                <div key={key} className="relative aspect-square rounded-[10px] overflow-hidden bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 flex items-center justify-center">
-                                  {src
-                                    ? <img src={src} alt={key} className="w-full h-full object-cover" />
-                                    : <Loader2 size={16} className="animate-spin opacity-30" />}
-                                  <span className="absolute bottom-1 left-1 font-mono text-[8px] uppercase tracking-widest bg-black/60 text-white px-1 rounded">{key}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <p className="font-mono text-[10px] opacity-40 text-center mt-1">ELEVATION SHEET placed on canvas</p>
-                        </div>
-                      ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-3 opacity-30">
-                          <Book size={28} />
-                          <p className="font-mono text-xs text-center">Select an image and tap IMAGE TO ELEVATION to auto-generate the 5-view elevation sheet.</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
-                      <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
-                        © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
-                      </p>
-                    </div>
-                  </div>
-                </aside>
-              </div>
 
               {/* V177 CHANGE VIEWPOINT Panel */}
               <div className={`
@@ -4039,41 +3853,24 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                       <div>
                         <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-3">Viewpoint</span>
                         <div className="flex-shrink-0 w-full aspect-square mx-auto rounded-[20px] bg-white/30 dark:bg-black/30 border border-black/5 dark:border-white/5">
-                          {(() => {
-                            const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                            const v0AngleStr = sourceItem?.parameters?.analyzedOpticalParams?.angle;
-                            const v0Index = v0AngleStr ? ANGLES.indexOf(v0AngleStr) : -1;
-                            return (
-                              <SitePlanDiagram
-                                angle={ANGLES[angleIndex]}
-                                isAnalyzing={isAnalyzing}
-                                analysisStep={analysisStep}
-                                lens={LENSES[lensIndex].value}
-                                visibleV0Index={v0Index !== -1 ? v0Index : null}
-                              />
-                            );
-                          })()}
+                          <SitePlanDiagram
+                            angle={ANGLES[angleIndex]}
+                            isAnalyzing={isAnalyzing}
+                            analysisStep={analysisStep}
+                            lens={LENSES[lensIndex].value}
+                          />
                         </div>
                       </div>
 
                       {/* Sliders */}
                       <div className={`flex flex-col space-y-4 px-1 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
-                        {(() => {
-                          const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                          const v0AngleStr = sourceItem?.parameters?.analyzedOpticalParams?.angle;
-                          const v0Index = v0AngleStr ? ANGLES.indexOf(v0AngleStr) : -1;
-                          const minAngle = v0Index !== -1 ? Math.max(0, v0Index - 1) : 0;
-                          const maxAngle = v0Index !== -1 ? Math.min(ANGLES.length - 1, v0Index + 1) : ANGLES.length - 1;
-
-                          return (
-                            <>
-                              <div>
-                                <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
-                                  <span className="opacity-70 uppercase tracking-widest">Angle</span>
-                                  <span className="font-bold">{ANGLES[angleIndex]}</span>
-                                </div>
-                                <input type="range" min={minAngle} max={maxAngle} step="1" value={angleIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAngleIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
-                              </div>
+                        <div>
+                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
+                            <span className="opacity-70 uppercase tracking-widest">Angle</span>
+                            <span className="font-bold">{ANGLES[angleIndex]}</span>
+                          </div>
+                          <input type="range" min="0" max={ANGLES.length - 1} step="1" value={angleIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAngleIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
+                        </div>
                         <div>
                           <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
                             <span className="opacity-70 uppercase tracking-widest">Altitude</span>
@@ -4095,9 +3892,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                           </div>
                           <input type="range" min="0" max={TIMES.length - 1} step="1" value={timeIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTimeIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
                         </div>
-                            </>
-                          );
-                        })()}
                       </div>
                     </div>
 

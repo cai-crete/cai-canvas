@@ -43,7 +43,12 @@
       "Bash(grep -v \"//.*ANALYZED\\\\|//.*VIEWPOINT\\\\|//.*EDIT\\\\|//.*SKETCH\")",
       "Bash(grep -n \"item.type === ''generated''\\\\|item.type === ''sketch_generated''\\\\|generated.*toolbar\\\\|sketch_generated.*toolbar\" \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
       "Bash(ls \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/작업지시서_V\"*.md)",
-      "Bash(grep -n \"startsWith\\(''EDIT ''\\)\\\\|label.*EDIT\\\\|EDIT.*label\" \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")"
+      "Bash(grep -n \"startsWith\\(''EDIT ''\\)\\\\|label.*EDIT\\\\|EDIT.*label\" \"d:/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
+      "Bash(grep -n \"item.type === ''upload'' || item.type === ''generated'' || item.type === ''artboard''\" \"/d/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
+      "Bash(grep -n \"Text Tool\\\\|textTarget\\\\|canvasMode === ''text''\" \"/d/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
+      "Bash(grep -n \"item.type === ''text''\" \"/d/OneDrive/바탕 화면/CRETE/change-viewpoint/src/App.tsx\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\(''version'',''?''\\)\\)\")",
+      "Bash(node -e \"const p=require\\(''./node_modules/@google/genai/package.json''\\); console.log\\(p.version\\)\")"
     ]
   }
 }

@@ -1,0 +1,2601 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Footprints, Plus, PanelLeft, Lasso, X, Copy } from 'lucide-react';
+import { GoogleGenAI } from '@google/genai';
+import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
+
+// --- Constants for Discrete Parameters ---
+const ANGLES = ['12:00', '1:30', '3:00', '04:30', '06:00', '07:30', '09:00', '10:30'];
+
+const ALTITUDES = [
+  { label: "-2.0m (Worm's Eye View)", value: -2.0 },
+  { label: "0m (Low Angle View)", value: 0 },
+  { label: "1.6m (Eye Level View)", value: 1.6 },
+  { label: "10m (Low Aerial View)", value: 10 },
+  { label: "50m (Mid Aerial View)", value: 50 },
+  { label: "150m (Bird's Eye View)", value: 150 },
+  { label: "200m (High Angle Orbit)", value: 200 },
+  { label: "300m (Top-Down Aerial View)", value: 300 }
+];
+
+const LENSES = [
+  { label: "23mm (Tilt-Shift Lens)", value: 23 },
+  { label: "24mm (Wide Lens)", value: 24 },
+  { label: "32mm (Aerial Lens)", value: 32 },
+  { label: "35mm (Wide Standard Lens)", value: 35 },
+  { label: "45mm (Standard Lens)", value: 45 },
+  { label: "50mm (Normal Lens)", value: 50 },
+  { label: "85mm (Short Telephoto Lens)", value: 85 },
+  { label: "110mm (Macro Lens)", value: 110 }
+];
+
+const TIMES = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
+
+const STYLE_DESCRIPTIONS: Record<string, { title: { ko: string, en: string }, keywords: { ko: string, en: string }[] }> = {
+  'A': {
+    title: { ko: '장중한 메스의 규칙', en: 'Vitruvian Tectonics' },
+    keywords: [
+      { en: 'Fragment', ko: '분절' },
+      { en: 'Stagger', ko: '엇갈림' },
+      { en: 'Deep Set Recess', ko: '창호의 깊이감' },
+      { en: 'Contextual Material Derivation', ko: '맥락적 재료 파생' },
+      { en: 'Diffuse Timelessness', ko: '확산된 시간성' }
+    ]
+  },
+  'B': {
+    title: { ko: '순수한 기하학적형태', en: 'Geometric Purity' },
+    keywords: [
+      { en: 'Orthogonal Grid', ko: '직교 그리드' },
+      { en: 'Layered Transparency', ko: '레이어 투명성' },
+      { en: 'Elevated Massing', ko: '띄워진 매스' },
+      { en: 'Absolute Whiteness', ko: '절대 백색' },
+      { en: 'Hard Sunlight Chiaroscuro', ko: '강렬한 명암법' }
+    ]
+  },
+  'C': {
+    title: { ko: '가구식 구조', en: 'Particlization' },
+    keywords: [
+      { en: 'Divide', ko: '분할' },
+      { en: 'Kigumi Joinery', ko: '결구 접합' },
+      { en: 'Deep Eaves', ko: '깊은 처마' },
+      { en: 'Blurred Edge', ko: '흐릿한 경계' },
+      { en: 'Komorebi Lighting', ko: '목과 빛' }
+    ]
+  },
+  'D': {
+    title: { ko: '고지식한 조형성', en: 'Incised Geometry' },
+    keywords: [
+      { en: 'Platonic Extrusion', ko: '플라톤적 돌출' },
+      { en: 'Strategic Incision', ko: '전략적 절개' },
+      { en: 'Horizontal Striping', ko: '수평 줄무늬' },
+      { en: 'Brick Pattern Variation', ko: '벽돌 패턴 변주' },
+      { en: 'Grounded Solidity', ko: '접지된 견고함' }
+    ]
+  },
+  'E': {
+    title: { ko: '조형적인 유선형', en: 'Sculptural Fluidity' },
+    keywords: [
+      { en: 'Collide & Explode', ko: '충돌과 폭발' },
+      { en: 'Curve & Crumple', ko: '곡면과 구김' },
+      { en: 'Metallic Skin', ko: '금속 피부' },
+      { en: 'Asymmetric Fragmentation', ko: '비대칭 파편화' },
+      { en: 'Oblique Sunlight Drama', ko: '비스듬한 햇빛 드라마' }
+    ]
+  },
+  'F': {
+    title: { ko: '다이어그램의 구조화', en: 'Diagrammatic Formalism' },
+    keywords: [
+      { en: 'Dual Grid Superimposition', ko: '이중 그리드 중첩' },
+      { en: 'Transformation Sequence', ko: '변형 연산 시퀀스' },
+      { en: 'Indexical Trace', ko: '지표적 흔적' },
+      { en: 'Anti-Compositional Logic', ko: '반구성 논리' },
+      { en: 'White Neutrality', ko: '백색 중립성' }
+    ]
+  },
+  'G': {
+    title: { ko: '노출된 하이테크', en: 'Tectonic Transparency' },
+    keywords: [
+      { en: 'Kit of Parts', ko: '부품 조립' },
+      { en: 'Multi-Layered Facade', ko: '다층 입면' },
+      { en: 'Floating Roof', ko: '떠 있는 지붕' },
+      { en: 'Exposed Services', ko: '노출 설비' },
+      { en: 'Adaptive Permeability', ko: '적응적 투과성' }
+    ]
+  }
+};
+
+// --- 5-IVSP Protocol Helper ---
+// --- 5-IVSP Protocol Helper ---
+const determineScenario = (angleStr: string, altitude: number, lens: number) => {
+  if (altitude > 150) return '[Scenario B] Aerial View (High Altitude): Phase One + 32mm';
+  if (lens > 85) return '[Scenario C] Detail View (Macro): 110mm Macro';
+  if (angleStr === '04:30' || angleStr === '07:30') return '[Scenario D] General View (Quarter): 45mm Standard';
+  return '[Scenario A] Street View: Fujifilm GFX 100S + 23mm Tilt-Shift';
+};
+
+// V70/V71: Map 5-IVSP Angle to 3x3 Cross Layout Slots
+// Cross Layout: Row0=[_,TOP,_], Row1=[LEFT,FRONT,RIGHT], Row2=[_,REAR,_]
+// Corner angles → composite: two adjacent faces injected together
+const getElevationSlot = (angle: string): { row: number; col: number; label: string }[] => {
+  if (angle === '06:00') return [{ row: 1, col: 1, label: 'FRONT' }];
+  if (angle === '12:00') return [{ row: 2, col: 1, label: 'REAR' }];
+  if (angle === '3:00') return [{ row: 1, col: 2, label: 'RIGHT' }];
+  if (angle === '09:00') return [{ row: 1, col: 0, label: 'LEFT' }];
+  // Corner angles → composite (both adjacent faces)
+  if (angle === '1:30') return [{ row: 2, col: 1, label: 'REAR' }, { row: 1, col: 2, label: 'RIGHT' }];
+  if (angle === '04:30') return [{ row: 1, col: 2, label: 'RIGHT' }, { row: 1, col: 1, label: 'FRONT' }];
+  if (angle === '07:30') return [{ row: 1, col: 1, label: 'FRONT' }, { row: 1, col: 0, label: 'LEFT' }];
+  if (angle === '10:30') return [{ row: 1, col: 0, label: 'LEFT' }, { row: 2, col: 1, label: 'REAR' }];
+  return [{ row: 1, col: 1, label: 'FRONT' }];
+};
+
+// V70: Crop a single elevation cell from the 3x3 Cross Layout sheet
+const cropElevationFromSheet = (sheetDataUrl: string, slot: { row: number; col: number; label: string }): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const cellW = Math.floor(img.width / 3);
+      const cellH = Math.floor(img.height / 3);
+      const canvas = document.createElement('canvas');
+      canvas.width = cellW;
+      canvas.height = cellH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas context unavailable')); return; }
+      ctx.drawImage(img, slot.col * cellW, slot.row * cellH, cellW, cellH, 0, 0, cellW, cellH);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = sheetDataUrl;
+  });
+};
+
+
+// --- Site Plan Diagram Component ---
+const SitePlanDiagram = ({ angle, isAnalyzing, analysisStep }: { angle: string, lens: number, sitePlanImage: string | null, isAnalyzing: boolean, analysisStep: string }) => {
+  // Map angle string to degrees (06:00 = 180deg, 12:00 = 0deg, etc.)
+  const angleMap: Record<string, number> = {
+    '12:00': 0, '1:30': 45, '3:00': 90, '04:30': 135,
+    '06:00': 180, '07:30': 225, '09:00': 270, '10:30': 315
+  };
+
+  const rotation = angleMap[angle] !== undefined ? angleMap[angle] : 180;
+  const radius = 90; // SVG radius
+  const cx = 100;
+  const cy = 100;
+
+  // Calculate camera position
+  const rad = (rotation - 90) * (Math.PI / 180);
+  const cameraX = cx + radius * Math.cos(rad);
+  const cameraY = cy + radius * Math.sin(rad);
+
+  return (
+    <div className="w-full aspect-square relative flex items-center justify-center overflow-hidden transition-colors duration-300">
+
+      {/* 80% Center Canvas */}
+      <div className="absolute w-[80%] h-[80%] flex items-center justify-center z-0">
+        <div className="relative w-full h-full flex items-center justify-center">
+
+          {/* Center Rectangle (Black fill, white 0.5 stroke, diagonal pattern) */}
+          <div
+            className="relative w-[60%] h-[40%] bg-black dark:bg-white flex items-center justify-center z-0 overflow-hidden"
+            style={{
+              border: '1px solid rgba(255,255,255,0.5)',
+            }}
+          >
+            {/* Diagonal pattern */}
+            <div className="absolute inset-0 opacity-50 bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,white_2px,white_4px)] dark:bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,black_2px,black_4px)]" />
+          </div>
+        </div>
+      </div>
+
+      {/* SVG Diagram Layer */}
+      <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full z-10 pointer-events-none">
+        {/* Dashed Circle (Ratio 2(line):1(gap)) */}
+        <circle
+          cx={cx} cy={cy} r={radius}
+          fill="none" stroke="currentColor" strokeWidth="1"
+          strokeDasharray="8 4"
+          className="text-black/30 dark:text-white/30"
+        />
+
+        {/* Camera Pictogram / Dot */}
+        <g transform={`translate(${cameraX}, ${cameraY}) rotate(${rotation})`}>
+          <circle cx="0" cy="0" r="4.0" fill="currentColor" className="text-black dark:text-white" />
+        </g>
+      </svg>
+
+      {/* V156: Black spinner + Blinking step messages */}
+      {isAnalyzing && (
+        <div className="absolute inset-0 bg-white/80 dark:bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center z-30 transition-colors duration-300 rounded-full overflow-hidden">
+          <style>{`
+            @keyframes blink-text {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0; }
+            }
+            .step-msg-sm {
+              animation: blink-text 1.5s ease-in-out infinite;
+              font-family: 'Inter', sans-serif;
+              font-size: 11px;
+              letter-spacing: 0.08em;
+              color: #000;
+              text-align: center;
+              padding: 0 8px;
+              margin-top: 8px;
+            }
+            .dark .step-msg-sm { color: #fff; }
+          `}</style>
+          <Loader2 size={32} className="animate-spin text-black dark:text-white" />
+          <span className="step-msg-sm">{analysisStep || '분석 중...'}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface CanvasItem {
+  id: string;
+  type: 'upload' | 'generated';
+  src: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  // V74: Metadata linking
+  motherId: string | null;
+  parameters: {
+    angleIndex: number;
+    altitudeIndex: number;
+    lensIndex: number;
+    timeIndex: number;
+    analyzedOpticalParams?: any | null;
+    elevationParams?: any | null;
+    sitePlanImage?: string | null;
+    elevationImages?: {
+      front: string | null;
+      right: string | null;
+      rear: string | null;
+      left: string | null;
+      top: string | null;
+    } | null;
+  } | null;
+}
+
+export default function App() {
+  // --- State ---
+  const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const selectedItemIdsRef = useRef<string[]>([]);
+  const [isLassoing, setIsLassoing] = useState(false);
+  const isLassoingRef = useRef(false);
+  const [lassoPath, setLassoPath] = useState<{ x: number, y: number }[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Drag & Resize Refs (Ref 기반 — stale closure 방지)
+  const isDraggingItemRef = useRef(false);
+  const isResizingItemRef = useRef(false);
+  const isDraggingPanRef = useRef(false);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, itemX: 0, itemY: 0 });
+  const resizeCornerRef = useRef({ dx: 1, dy: 1 });
+  // V189: Store multiple starting positions for drag
+  const clickedItemStartPositionsRef = useRef<Record<string, { x: number, y: number }>>({});
+  const pendingToggleItemIdRef = useRef<string | null>(null);
+  const isTwoFingerActiveRef = useRef(false); // V198: Block lasso on two-finger touch
+  const previousCanvasModeRef = useRef<'select' | 'pan' | 'lasso'>('select'); // V199: Pan persistence
+  // V157: AbortController for canceling generation
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Keep State for render (cursor CSS)
+  const [isDraggingItem, setIsDraggingItem] = useState(false);
+  const [isResizingItem, setIsResizingItem] = useState(false);
+  const [isDraggingPan, setIsDraggingPan] = useState(false);
+
+
+  // PRD Parameters
+  const [prompt, setPrompt] = useState('');
+  const [angleIndex, setAngleIndex] = useState<number>(4); // 06:00
+  const [altitudeIndex, setAltitudeIndex] = useState<number>(2); // 1.6m
+  const [lensIndex, setLensIndex] = useState<number>(0); // 23mm
+  const [timeIndex, setTimeIndex] = useState<number>(2); // 12:00
+  const [elevationParams, setElevationParams] = useState<any>(null);
+
+  // Analyzed (Read-only) Parameters for UI Display
+  const [analyzedOpticalParams, setAnalyzedOpticalParams] = useState<{
+    angle: string;
+    altitude: string;
+    lens: string;
+    time: string;
+  } | null>(null);
+
+  // UI State
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false); // V173
+  const [activeTab, setActiveTab] = useState<'control' | 'result'>('control');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState<string>(''); // V155: 단계 메시지
+  const [sitePlanImage, setSitePlanImage] = useState<string | null>(null);
+  const [elevationImages, setElevationImages] = useState<{
+    front: string | null;
+    right: string | null;
+    rear: string | null;
+    left: string | null;
+    top: string | null;
+  } | null>(null);
+
+
+
+  // Zoom & Pan State
+  const [canvasZoom, setCanvasZoom] = useState(100);
+  const [canvasOffset, setCanvasOffset] = useState({ x: 0, y: 0 });
+  const [focusMode, setFocusMode] = useState<'all' | 'target'>('all');
+  const [canvasMode, setCanvasMode] = useState<'select' | 'pan' | 'lasso'>('select');
+
+  // V203: Right panel function selector
+  const [isFunctionSelectorOpen, setIsFunctionSelectorOpen] = useState(true);
+  const [selectedFunction, setSelectedFunction] = useState('CHANGE VIEWPOINT');
+
+  // V209: Sketch To Image Panel State
+  const [sketchPrompt, setSketchPrompt] = useState('');
+  const [sketchMode, setSketchMode] = useState('');
+  const [sketchStyle, setSketchStyle] = useState<string | null>(null);
+  const [activeDetailStyle, setActiveDetailStyle] = useState<string | null>(null);
+
+  // V218: PLANNERS Panel States
+  const [plannerCode, setPlannerCode] = useState<string>("");
+  const [plannerAgents, setPlannerAgents] = useState<number[]>([]);
+
+  // V217: PRINT Panel States
+  const [printPrompt, setPrintPrompt] = useState<string>("");
+  const [printTemplate, setPrintTemplate] = useState<string>("REPORT");
+  const [printPages, setPrintPages] = useState<number>(7);
+
+  // V250: Mother App Common States (Resolution & Aspect Ratio)
+  const [resolution, setResolution] = useState<string>('NORMAL QUALITY');
+  const [aspectRatio, setAspectRatio] = useState<string>('4:3');
+
+  // V75: Item-bound Library State
+  const [openLibraryItemId, setOpenLibraryItemId] = useState<string | null>(null);
+  const [artboardPage, setArtboardPage] = useState<number>(1); // V180: Artboard pagination 1-5
+
+  // V75: History State for Undo
+  const [historyStates, setHistoryStates] = useState<CanvasItem[][]>([]);
+  // V113: Redo State
+  const [redoStates, setRedoStates] = useState<CanvasItem[][]>([]);
+
+  const handleUndo = () => {
+    if (historyStates.length > 0) {
+      const currentState = [...canvasItems];
+      const previousState = historyStates[historyStates.length - 1];
+
+      setRedoStates(prev => [...prev, currentState]);
+      setCanvasItems(previousState);
+      setHistoryStates(prev => prev.slice(0, -1));
+      setSelectedItemIds([]);
+      selectedItemIdsRef.current = [];
+    }
+  };
+
+  const handleRedo = () => {
+    if (redoStates.length > 0) {
+      const currentState = [...canvasItems];
+      const nextState = redoStates[redoStates.length - 1];
+
+      setHistoryStates(prev => [...prev, currentState]);
+      setCanvasItems(nextState);
+      setRedoStates(prev => prev.slice(0, -1));
+      setSelectedItemIds([]);
+      selectedItemIdsRef.current = [];
+    }
+  };
+
+  // Touch State Refs
+  const lastTouchDist = useRef<number | null>(null);
+  const lastTouchCenter = useRef<{ x: number, y: number } | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLElement>(null); // V54: Absolute ref for canvas section
+
+  // V74: Responsive Scale State
+  const [appScale, setAppScale] = useState(1);
+
+  // --- Effects ---
+  // V74: Synchronize selected item's parameters to UI panels, and reset on deselect
+  // V108: Hybrid Sync - Sliders (Independent) / Analysis Data (Shared from Mother)
+  useEffect(() => {
+    if (selectedItemIds.length === 0) {
+      // Background click -> Reset to default empty state
+      setAngleIndex(4);
+      setAltitudeIndex(2);
+      setLensIndex(0);
+      setTimeIndex(2);
+      setAnalyzedOpticalParams(null);
+      setElevationParams(null);
+      setSitePlanImage(null);
+      setElevationImages(null);
+      return;
+    }
+
+    const item = canvasItems.find(i => i.id === selectedItemIds[0]);
+    if (item && item.parameters) {
+      // 1. Viewpoint Sliders (Independent) -> Always from current item snapshot
+      setAngleIndex(item.parameters.angleIndex);
+      setAltitudeIndex(item.parameters.altitudeIndex);
+      setLensIndex(item.parameters.lensIndex);
+      setTimeIndex(item.parameters.timeIndex);
+
+      // V145: Independent Yet Identical Data Ownership
+      const analysisSource = item.parameters;
+
+      setAnalyzedOpticalParams(analysisSource.analyzedOpticalParams || null);
+      setElevationParams(analysisSource.elevationParams || null);
+      setSitePlanImage(analysisSource.sitePlanImage || null);
+      setElevationImages(analysisSource.elevationImages || null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedItemIds]); // only trigger on selection change
+
+  useEffect(() => {
+    // Determine the scale based on a reference resolution (e.g., 1440x900 or 1920x1080)
+    const updateScale = () => {
+      const baseWidth = 1440;
+      const baseHeight = 900;
+      const widthRatio = window.innerWidth / baseWidth;
+      const heightRatio = window.innerHeight / baseHeight;
+      // Scale to fit within the viewport (maintains aspect ratio, leaves letterboxing if window is not 16:10)
+      const scale = Math.min(widthRatio, heightRatio);
+      setAppScale(scale);
+    };
+
+    updateScale();
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, []);
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
+
+  // V200-3: Non-passive wheel listener for web zoom
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const zoomFactor = -e.deltaY * 0.1;
+      setCanvasZoom(prev => Math.min(Math.max(prev + zoomFactor, 10), 200));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
+  // --- Handlers ---
+  const ZOOM_STEPS_BUTTON = [10, 25, 50, 75, 100, 125, 150, 175, 200];
+
+  const zoomStep = (dir: 1 | -1) => {
+    setCanvasZoom(prev => {
+      if (dir === 1) {
+        const next = ZOOM_STEPS_BUTTON.find(v => v > prev);
+        return next !== undefined ? next : 200;
+      } else {
+        const next = [...ZOOM_STEPS_BUTTON].reverse().find(v => v < prev);
+        return next !== undefined ? next : 10;
+      }
+    });
+  };
+
+
+
+  const handleFocus = () => {
+    if (canvasItems.length === 0) {
+      setCanvasZoom(100);
+      setCanvasOffset({ x: 0, y: 0 });
+      return;
+    }
+
+    if (focusMode === 'all') {
+      // Fit All
+      const minX = Math.min(...canvasItems.map(i => i.x));
+      const minY = Math.min(...canvasItems.map(i => i.y));
+      const maxX = Math.max(...canvasItems.map(i => i.x + i.width));
+      const maxY = Math.max(...canvasItems.map(i => i.y + i.height));
+
+      const width = maxX - minX;
+      const height = maxY - minY;
+      const cx = minX + width / 2;
+      const cy = minY + height / 2;
+
+      const padding = 100;
+      // V54: Panel is overlay so viewport = full window width
+      const sectionW = window.innerWidth;
+      const sectionH = window.innerHeight;
+
+      const scaleX = (sectionW - padding) / width;
+      const scaleY = (sectionH - padding) / height;
+      const scale = Math.min(scaleX, scaleY, 1) * 100; // max zoom 100%
+
+      setCanvasZoom(Math.max(scale, 10)); // min zoom 10
+      setCanvasOffset({
+        x: -cx * (scale / 100),
+        y: -cy * (scale / 100)
+      });
+      setFocusMode('target');
+    } else {
+      // Focus Target (selected or last)
+      const targetItem = selectedItemIds[0]
+        ? canvasItems.find(i => i.id === selectedItemIds[0])
+        : canvasItems[canvasItems.length - 1];
+
+      if (targetItem) {
+        const cx = targetItem.x + targetItem.width / 2;
+        const cy = targetItem.y + targetItem.height / 2;
+
+        setCanvasZoom(100);
+        setCanvasOffset({
+          x: -cx,
+          y: -cy
+        });
+      }
+      setFocusMode('all');
+    }
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    // Web Zoom (No Ctrl needed as per user request for Miro-style)
+    e.preventDefault();
+    const zoomFactor = -e.deltaY * 0.1;
+    setCanvasZoom(prev => Math.min(Math.max(prev + zoomFactor, 10), 200));
+  };
+
+  const getCanvasCoords = (clientX: number, clientY: number) => {
+    const scale = canvasZoom / 100;
+
+    // V55: Use ABSOLUTE screen center as the fixed origin.
+    // This is the most robust way to ensure selection calibration 
+    // matches the visual center of the fullscreen canvas.
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+
+    return {
+      x: (clientX - cx - canvasOffset.x) / scale,
+      y: (clientY - cy - canvasOffset.y) / scale
+    };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    const target = e.target as HTMLElement;
+    const isUIInteraction = target.closest('.pointer-events-auto');
+    // V187: Allow resize handles to bypass UI block
+    const isResizeHandle = target.classList.contains('resize-handle') || target.style.cursor?.endsWith('-resize');
+    if (isUIInteraction && !isResizeHandle) return;
+
+    // V184: Auto-collapse expanded search ONLY when NOT clicking UI elements (Canvas or Item clicks)
+    if (isSearchExpanded) setIsSearchExpanded(false);
+
+    // V201-2: Stylus (pen) unblock - reset two-finger flag on pen input
+    if (e.pointerType === 'pen') isTwoFingerActiveRef.current = false;
+
+    const coords = getCanvasCoords(e.clientX, e.clientY);
+
+    if (canvasMode === 'pan') {
+      // In Pan mode, clicking ANYTHING (including images) leads to Panning.
+      isDraggingPanRef.current = true;
+      setIsDraggingPan(true);
+      dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // --- Select Mode ---
+
+    // 1. Check Resize Handles first (if exactly one item is selected)
+    // Direct hit via data-dx/dy or distance
+    const resizeCorner = (target.closest('.resize-handle') as HTMLElement)?.dataset;
+    if (resizeCorner && selectedItemIds.length === 1) {
+      const selectedId = selectedItemIds[0];
+      const item = canvasItems.find(i => i.id === selectedId);
+      if (item) {
+        setHistoryStates(prev => [...prev, canvasItems]);
+        setRedoStates([]);
+
+        isResizingItemRef.current = true;
+        setIsResizingItem(true);
+        resizeCornerRef.current = { dx: parseInt(resizeCorner.dx!), dy: parseInt(resizeCorner.dy!) };
+        resizeStartRef.current = { x: coords.x, y: coords.y, width: item.width, height: item.height, itemX: item.x, itemY: item.y };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+
+    // 2. Check Image Click for Selection/Drag
+    const clickedItem = [...canvasItems].reverse().find(item =>
+      coords.x >= item.x && coords.x <= item.x + item.width &&
+      coords.y >= item.y && coords.y <= item.y + item.height
+    );
+
+    if (clickedItem) {
+      setHistoryStates(prev => [...prev, canvasItems]);
+      setRedoStates([]);
+
+      let currentSelection = selectedItemIds;
+      if (!selectedItemIds.includes(clickedItem.id)) {
+        const newSelection = [...selectedItemIds, clickedItem.id];
+        setSelectedItemIds(newSelection);
+        selectedItemIdsRef.current = newSelection;
+        currentSelection = newSelection;
+        pendingToggleItemIdRef.current = null;
+      } else {
+        pendingToggleItemIdRef.current = clickedItem.id;
+      }
+
+      // V141: Transition library if open
+      if (openLibraryItemId && !currentSelection.includes(clickedItem.id)) {
+        setOpenLibraryItemId(clickedItem.id);
+      }
+
+      isDraggingItemRef.current = true;
+      setIsDraggingItem(true);
+      dragStartRef.current = { x: coords.x, y: coords.y };
+
+      // V193: Deselect Toggle Logic Init
+      if (selectedItemIds.includes(clickedItem.id)) {
+        pendingToggleItemIdRef.current = clickedItem.id;
+      }
+
+      clickedItemStartPositionsRef.current = currentSelection.reduce((acc, id) => {
+        const itm = canvasItems.find(i => i.id === id);
+        if (itm) acc[id] = { x: itm.x, y: itm.y };
+        return acc;
+      }, {} as Record<string, { x: number, y: number }>);
+
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // 3. No Item Clicked
+    // V198: Block lasso if two-finger touch is active
+    if (isTwoFingerActiveRef.current) return;
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    setOpenLibraryItemId(null);
+
+    if (canvasMode === 'lasso') {
+      // V201-1: Lasso mode only
+      setIsLassoing(true);
+      isLassoingRef.current = true;
+      setLassoPath([{ x: coords.x, y: coords.y }]);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } else {
+      // V201-1: Select mode background click → pan
+      isDraggingPanRef.current = true;
+      setIsDraggingPan(true);
+      dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const coords = getCanvasCoords(e.clientX, e.clientY);
+
+    if (isLassoingRef.current) {
+      setLassoPath(prev => [...prev, coords]);
+    } else if (isDraggingPanRef.current) {
+      setCanvasOffset({
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y
+      });
+    } else if (isDraggingItemRef.current && selectedItemIdsRef.current.length > 0) {
+      const currentIds = selectedItemIdsRef.current;
+      const dx = coords.x - dragStartRef.current.x;
+      const dy = coords.y - dragStartRef.current.y;
+
+      const threshold = (e.pointerType === 'pen' || e.pointerType === 'stylus') ? 6 : 3;
+      if (pendingToggleItemIdRef.current && (Math.abs(dx) > threshold || Math.abs(dy) > threshold)) {
+        pendingToggleItemIdRef.current = null;
+      }
+
+      setCanvasItems(prev => prev.map(item => {
+        if (!currentIds.includes(item.id)) return item;
+        const startPos = clickedItemStartPositionsRef.current[item.id];
+        return startPos ? { ...item, x: startPos.x + dx, y: startPos.y + dy } : item;
+      }));
+    } else if (isResizingItemRef.current && selectedItemIdsRef.current.length === 1) {
+      const selectedId = selectedItemIdsRef.current[0];
+      const dx = coords.x - resizeStartRef.current.x;
+      const dy = coords.y - resizeStartRef.current.y;
+      const aspect = resizeStartRef.current.width / resizeStartRef.current.height;
+
+      setCanvasItems(prev => prev.map(item => {
+        if (item.id !== selectedId) return item;
+
+        const rawDeltaW = dx * resizeCornerRef.current.dx;
+        const newWidth = Math.max(resizeStartRef.current.width + rawDeltaW, 50);
+        const newHeight = newWidth / aspect;
+
+        const newX = resizeCornerRef.current.dx === -1
+          ? resizeStartRef.current.itemX + (resizeStartRef.current.width - newWidth)
+          : resizeStartRef.current.itemX;
+        const newY = resizeCornerRef.current.dy === -1
+          ? resizeStartRef.current.itemY + (resizeStartRef.current.height - newHeight)
+          : resizeStartRef.current.itemY;
+
+        return { ...item, x: newX, y: newY, width: newWidth, height: newHeight };
+      }));
+    }
+  };
+
+  const isPointInPolygon = (point: { x: number, y: number }, polygon: { x: number, y: number }[]) => {
+    let isInside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      const intersect = ((yi > point.y) !== (yj > point.y)) &&
+        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+      if (intersect) isInside = !isInside;
+    }
+    return isInside;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (isLassoingRef.current) {
+      if (lassoPath.length > 3) {
+        const poly = lassoPath;
+        const newlySelected = canvasItems.filter(item => {
+          const corners = [
+            { x: item.x, y: item.y },
+            { x: item.x + item.width, y: item.y },
+            { x: item.x + item.width, y: item.y + item.height },
+            { x: item.x, y: item.y + item.height }
+          ];
+          return corners.some(c => isPointInPolygon(c, poly)) ||
+            poly.some(p => p.x >= item.x && p.x <= item.x + item.width && p.y >= item.y && p.y <= item.y + item.height);
+        }).map(item => item.id);
+
+        setSelectedItemIds(newlySelected);
+        selectedItemIdsRef.current = newlySelected;
+      }
+      setIsLassoing(false);
+      isLassoingRef.current = false;
+      setLassoPath([]);
+    }
+
+    if (pendingToggleItemIdRef.current) {
+      const tid = pendingToggleItemIdRef.current;
+      setSelectedItemIds(prev => prev.includes(tid) ? prev.filter(id => id !== tid) : [...prev, tid]);
+      pendingToggleItemIdRef.current = null;
+    }
+
+    isDraggingPanRef.current = false;
+    isDraggingItemRef.current = false;
+    isResizingItemRef.current = false;
+    setIsDraggingPan(false);
+    setIsDraggingItem(false);
+    setIsResizingItem(false);
+    pendingToggleItemIdRef.current = null;
+
+    if ((e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    }
+  };
+
+  // --- Tablet Touch Handlers ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      isTwoFingerActiveRef.current = true; // V198: Block lasso
+      previousCanvasModeRef.current = canvasMode as 'select' | 'pan'; // V199: Save mode
+      setCanvasMode('pan');
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
+      const center = {
+        x: (touch1.clientX + touch2.clientX) / 2,
+        y: (touch1.clientY + touch2.clientY) / 2
+      };
+      lastTouchDist.current = dist;
+      lastTouchCenter.current = { x: center.x - canvasOffset.x, y: center.y - canvasOffset.y };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+
+      // 1. Pinch Zoom
+      const dist = (Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY) - (lastTouchDist.current || 0)) * 0.5;
+      setCanvasZoom(prev => Math.min(Math.max(prev + dist, 10), 150));
+      lastTouchDist.current = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
+
+      // 2. Two-Finger Pan (Absolute screen coordinates for smoothness)
+      const center = {
+        x: (touch1.clientX + touch2.clientX) / 2,
+        y: (touch1.clientY + touch2.clientY) / 2
+      };
+      if (lastTouchCenter.current !== null) {
+        setCanvasOffset({
+          x: center.x - lastTouchCenter.current.x,
+          y: center.y - lastTouchCenter.current.y
+        });
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    const wasTwo = isTwoFingerActiveRef.current; // V200-1: Read before reset
+    isTwoFingerActiveRef.current = false;
+    lastTouchDist.current = null;
+    lastTouchCenter.current = null;
+    if (wasTwo) setCanvasMode(previousCanvasModeRef.current); // V200-1: Restore only after two-finger gesture
+  };
+
+  const toggleTheme = () => {
+    setTheme((prevTheme) => (prevTheme === 'light' ? 'dark' : 'light'));
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64Image = reader.result as string;
+
+
+
+        // V128: Step 1 — Load original image to get dimensions, then show it immediately on canvas
+        const img = new Image();
+        img.onload = async () => {
+          const newItemId = `item-${Date.now()}`;
+          // V139: Mother image scales to 50%
+          const scaledWidth = img.width * 0.5;
+          const scaledHeight = img.height * 0.5;
+
+          let newY = -scaledHeight / 2;
+          let newX = -scaledWidth / 2;
+
+          if (canvasItems.length > 0) {
+            const leftMostItem = canvasItems.reduce((prev, current) =>
+              (prev.x < current.x) ? prev : current
+            );
+            const bottomMostItem = canvasItems.reduce((prev, current) =>
+              (prev.y + prev.height > current.y + current.height) ? prev : current
+            );
+            newX = leftMostItem.x;
+            newY = bottomMostItem.y + bottomMostItem.height + 40;
+          }
+
+          const newItem: CanvasItem = {
+            id: newItemId,
+            type: 'upload',
+            src: base64Image, // Show original immediately
+            x: newX,
+            y: newY,
+            width: scaledWidth,
+            height: scaledHeight,
+            motherId: newItemId,
+            parameters: null
+          };
+
+          setHistoryStates(prevH => [...prevH, canvasItems]);
+          setCanvasItems(prev => [...prev, newItem]);
+          setSelectedItemIds([]); // V195: Initial state deactivated
+          setActiveTab('create');
+          setIsAnalyzing(true);
+          setAnalysisStep('배경 이미지 최적화 중...'); // V155: Step — Background Regen
+
+          // V128: Step 2 — Background regeneration, then replace src of existing item
+          let finalBase64 = base64Image;
+          try {
+            const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+            const response = await ai.models.generateContent({
+              model: IMAGE_GEN,
+              contents: {
+                parts: [
+                  { inlineData: { data: base64Image.split(',')[1], mimeType: base64Image.split(';')[0].split(':')[1] } },
+                  { text: "Recreate and enhance this architectural image exactly as it is without altering its geometry or perspective." }
+                ]
+              }
+            });
+
+            if (response.candidates && response.candidates[0]?.content?.parts) {
+              for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                  finalBase64 = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                  console.log("[V128] Image regenerated. Replacing canvas item src:", newItemId);
+                  // V128: Step 3 — Replace original with regenerated image in-place
+                  setCanvasItems(prev => prev.map(item =>
+                    item.id === newItemId ? { ...item, src: finalBase64 } : item
+                  ));
+                  break;
+                }
+              }
+            }
+          } catch (error) {
+            console.error("[V128] Regeneration failed, keeping original:", error);
+          }
+
+          // V124/V128: Auto-trigger Phase 2 Analysis after regeneration
+          analyzeViewpoint(finalBase64, newItemId);
+        };
+        img.src = base64Image;
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const analyzeViewpoint = async (base64Image: string, itemId?: string) => {
+    setIsAnalyzing(true);
+    setAnalysisStep('이미지 분석 중...'); // V155: Step — Analysis
+    try {
+      // Phase 1 & 2: Structural & Viewpoint Analysis using gemini-3.1-pro-preview
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      const analysisPrompt = `
+        Analyze this architectural image.
+        [CRITICAL PRINCIPLE - CLOCK-FACE COORDINATE SYSTEM]
+        1. Identify the architectural Main Facade first.
+        2. Imagine looking down at a clock face drawn on the ground, with the building at the center. 
+        3. Define the virtual camera's coordinates based on this strictly mapped clock-face:
+           - 06:00 = Camera looking STRAIGHT AT the Main Facade (Primary_Facade).
+           - 03:00 = Camera looking at the Right Side (Right_Facade).
+           - 09:00 = Camera looking at the Left Side (Left_Facade).
+           - 12:00 = Camera looking at the Rear/Back (Rear_Facade).
+        4. Output the estimated angle (Where the camera is currently standing taking this photo) from the discrete options: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30.
+        
+        Return estimated parameters in JSON format:
+        {
+          "angle": "One of: 12:00, 1:30, 3:00, 04:30, 06:00 (Straight Front), 07:30, 09:00, 10:30",
+          "altitude_index": "0 to 7 (index of ALTITUDES constant)",
+          "lens_index": "0 to 7 (index of LENSES constant)",
+          "time_index": "0 to 7 (index of TIMES constant)",
+          "site_plan_hint": "Description of building footprint",
+          "elevation_parameters": {
+            "1_macro_geometry": {
+              "mass_typology": "Enum: Single_Block / L_Shape / U_Shape / Stepped / Cantilevered",
+              "proportion_ratio": "String X:Y:Z",
+              "floor_count": "Integer",
+              "roof_form": "Enum: Flat / Pitched / Gable / Hip",
+              "core_typology": "Enum: Center_Core / Side_Core / Rear_Core / Split_Core",
+              "base_type": "Enum: Solid_Plinth / Piloti / Sunken"
+            },
+            "2_site_constraints": {
+              "context_type": "Enum: Type_A_Urban_Dense / Type_B_Open_Detached",
+              "blind_wall": "Boolean for Left/Right/Rear"
+            },
+            "3_material": {
+              "base_material_type": "Enum: Exposed_Concrete / Brick_Masonry / Metal_Panel / Glass_CurtainWall / etc",
+              "base_color_hex": "String hex code"
+            },
+            "4_fenestration": {
+              "fenestration_type": "Enum: Punched_Window / Ribbon_Window / Curtain_Wall / Storefront",
+              "window_to_wall_ratio": "Float 0.0~1.0"
+            },
+            "5_articulation": {
+              "has_balcony": true/false,
+              "has_vertical_fins": true/false
+            },
+            "6_mep_assets": {
+              "spawn_hvac_unit": true/false
+            }
+          }
+          }
+        }
+      `;
+
+      const base64Data = base64Image.split(',')[1];
+      const mimeType = base64Image.split(';')[0].split(':')[1];
+
+      const runAnalysis = async (modelName: string) => {
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              { inlineData: { data: base64Data, mimeType: mimeType } },
+              { text: analysisPrompt },
+            ],
+          },
+        });
+
+        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const jsonStr = responseText.match(/\{[\s\S]*\}/)?.[0];
+        if (!jsonStr) throw new Error("No JSON returned from model");
+
+        const data = JSON.parse(jsonStr);
+        const aIdx = ANGLES.indexOf(data.angle);
+        if (aIdx !== -1) setAngleIndex(aIdx);
+        if (data.altitude_index !== undefined) setAltitudeIndex(Number(data.altitude_index));
+        if (data.lens_index !== undefined) setLensIndex(Number(data.lens_index));
+        if (data.time_index !== undefined) setTimeIndex(Number(data.time_index));
+
+        // --- V152: PROTOCOL FAIL VERIFICATION (루프 브레이커) ---
+        // 단방향 추론 (One-Way Inference) 원칙: 추출 정보가 불완전하면 즉결 처분(FAIL)하고 중단함 (좀비 객체 방지).
+        const hasElevParams = data.elevation_parameters &&
+          data.elevation_parameters['1_macro_geometry'] &&
+          data.elevation_parameters['2_site_constraints'] &&
+          data.elevation_parameters['3_material'] &&
+          data.elevation_parameters['4_fenestration'] &&
+          data.elevation_parameters['5_articulation'];
+
+        if (!hasElevParams) {
+          console.error('[PROTOCOL-FAIL] Phase 2 검증 실패: 필수 건축 파라미터(AEPL) 스키마가 누락되었거나 환각 텍스트가 반환되었습니다.');
+          setCanvasItems(prev => prev.filter(item => item.id !== itemId));
+          setIsAnalyzing(false);
+          setIsGenerating(false);
+          return false;
+        }
+        console.log('[PROTOCOL-PASS] Phase 2 검증 통과: 파라미터 완전성 확인');
+        // --------------------------------------------------------
+
+        const analyzedOpt = {
+          angle: data.angle,
+          altitude: ALTITUDES[Number(data.altitude_index) || 0]?.label || 'N/A',
+          lens: LENSES[Number(data.lens_index) || 0]?.label || 'N/A',
+          time: TIMES[Number(data.time_index) || 0] || 'N/A'
+        };
+        setAnalyzedOpticalParams(analyzedOpt);
+        setElevationParams(data.elevation_parameters || null);
+
+        // Update the newly uploaded Mother item with the analyzed data
+        const newParams = {
+          angleIndex: aIdx !== -1 ? aIdx : 4,
+          altitudeIndex: Number(data.altitude_index) || 2,
+          lensIndex: Number(data.lens_index) || 0,
+          timeIndex: Number(data.time_index) || 2,
+          analyzedOpticalParams: analyzedOpt,
+          elevationParams: data.elevation_parameters || null,
+          sitePlanImage: null,
+          architecturalSheetImage: null
+        };
+
+        setCanvasItems(prev => prev.map(item =>
+          item.id === itemId ? { ...item, parameters: newParams } : item
+        ));
+
+        // After parameter analysis, trigger individual elevation generation with extracted params
+        await generateElevations(base64Image, data.elevation_parameters, itemId);
+        return true;
+      };
+
+      try {
+        await runAnalysis(ANALYSIS);
+      } catch (primaryError) {
+        console.warn(`Primary model (${ANALYSIS}) failed, retrying with fallback...`, primaryError);
+        const success = await runAnalysis(ANALYSIS_FALLBACK);
+        if (!success) throw new Error("Fallback failed");
+      }
+
+    } catch (err) {
+      console.warn("Analysis failed completely, using defaults", err);
+      alert("분석 API 호출이 실패하거나 할당량(Quota)을 초과했습니다. 기본값으로 세팅됩니다.");
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisStep(''); // V155: 메시지 초기화
+    }
+  };
+
+
+  const generateElevations = async (base64Image: string, extractedParams?: any, itemId?: string) => {
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "Utilize implicit building context";
+
+      setAnalysisStep('입면 데이터 생성 중...');
+
+      const base64Data = base64Image.split(',')[1];
+      const mimeType = base64Image.split(';')[0].split(':')[1];
+
+      const viewConfigs = [
+        { key: 'front', label: 'FRONT', angle: '06:00' },
+        { key: 'right', label: 'RIGHT', angle: '03:00' },
+        { key: 'rear', label: 'REAR', angle: '12:00' },
+        { key: 'left', label: 'LEFT', angle: '09:00' },
+        { key: 'top', label: 'TOP', angle: 'TOP_VIEW' }
+      ];
+
+      const generateOne = async (config: typeof viewConfigs[0]) => {
+        const prompt = `
+          [Architectural Elevation Generation Protocol - System Protocol V180]
+          TASK: Generate a single ${config.label} orthographic view of the building.
+          
+          [CONTEXT]
+          - Source Image: Use the uploaded photo for material/texture truth.
+          - Architectural Parameters: ${contextualParamsStr}
+          
+          [SPECIFICATION]
+          - View: ${config.label === 'TOP' ? 'Top-down Roof Plan' : `Elevation from ${config.angle} (o'clock)`}
+          - Projection: True Orthographic (FOV=0), zero perspective.
+          - Style: Realistic architectural rendering, matching the source texture.
+          - Background: Pure Transparent Background (Optical Null Space).
+          - Orientation: ${config.label === 'TOP' ? 'Align Front (06:00) to Bottom of frame' : 'Straight on elevation'}
+          
+          CONSTRAINTS: NO text, NO labels, No perspective distortion.
+        `.trim();
+
+        const result = await ai.models.generateContent({
+          model: IMAGE_GEN,
+          contents: {
+            parts: [
+              { inlineData: { data: base64Data, mimeType: mimeType } },
+              { text: prompt },
+            ],
+          },
+        });
+
+        if (result.candidates?.[0]?.content?.parts) {
+          for (const part of result.candidates[0].content.parts) {
+            if (part.inlineData) {
+              return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            }
+          }
+        }
+        return null;
+      };
+
+      // Generate all 4 views in parallel
+      const results = await Promise.all(viewConfigs.map(config => generateOne(config)));
+
+      const newImages = {
+        front: results[0],
+        right: results[1],
+        rear: results[2],
+        left: results[3],
+        top: results[4]
+      } as const;
+
+      setElevationImages(newImages);
+      // V180: Use TOP VIEW for sitePlanImage compat
+      if (newImages.top) setSitePlanImage(newImages.top);
+
+      if (itemId) {
+        setCanvasItems(prev => prev.map(item => {
+          if (item.id === itemId && item.parameters) {
+            return {
+              ...item,
+              parameters: {
+                ...item.parameters,
+                elevationImages: newImages,
+                sitePlanImage: newImages.top
+              }
+            };
+          }
+          return item;
+        }));
+      }
+
+    } catch (err) {
+      console.warn("Elevation generation failed", err);
+    } finally {
+      setAnalysisStep('');
+    }
+  };
+
+  // ---
+  // PHASE 4: SYNTHESIS & GENERATION (Mother App Unified Controller)
+  // ---
+  const handleGenerate = async () => {
+    // 0. FUNCTION MULTIPLEXER
+    if (selectedFunction === 'CHANGE VIEWPOINT') {
+      const sourceItem = selectedItemIds[0]
+        ? canvasItems.find(item => item.id === selectedItemIds[0])
+        : (canvasItems.length > 0 ? canvasItems[0] : null);
+
+      if (!sourceItem) {
+        alert("Please upload at least one image first.");
+        return;
+      }
+
+      // --- V153: PHASE 3 검증 (Viewpoint Configuration Validation) ---
+      const isValidPhase3 = ANGLES[angleIndex] && ALTITUDES[altitudeIndex] && LENSES[lensIndex] && TIMES[timeIndex];
+      if (!isValidPhase3) {
+        console.error('[PROTOCOL-FAIL] Phase 3 검증 실패: 유효하지 않은 5-IVSP 시점 파라미터가 감지되어 재추론을 시도합니다.');
+        return;
+      }
+      console.log('[PROTOCOL-PASS] Phase 3 검증 통과: 5-IVSP 파라미터 셋업 유효함');
+
+      // --- V153: PHASE 4 Pre-flight 검증 (Integration Validation) ---
+      const hasEnsemblePair = sourceItem.src && elevationParams && Object.keys(elevationParams).length > 0;
+      if (!hasEnsemblePair) {
+        console.error('[PROTOCOL-FAIL] Phase 4 (Pre-flight) 검증 실패: ensemble_pair 불일치. 재질/속성 파라미터가 누락되었습니다.');
+        alert('건축 파라미터 속성이 누락되어 렌더링을 차단합니다. 다시 생성 버튼을 눌러주세요.');
+        return;
+      }
+      console.log('[PROTOCOL-PASS] Phase 4 (Pre-flight) 검증 통과: 양손역부족 통과, ensemble_pair 무결성 확인');
+
+      const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === sourceItem.id || (i.motherId === undefined && i.id === sourceItem.id)));
+      const isFirstTime = sourceItem.type === 'upload' && !hasInitialViews;
+
+      setIsGenerating(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const v0_angle = analyzedOpticalParams?.angle || 'Unknown';
+        const v0_altitude = analyzedOpticalParams?.altitude || 'Unknown';
+        const v0_lens = analyzedOpticalParams?.lens || 'Unknown';
+        const v0_time = analyzedOpticalParams?.time || 'Unknown';
+
+        const getAngle = (base: string) => {
+          if (['07:30', '09:00', '10:30'].includes(base)) return '07:30';
+          return '04:30';
+        };
+
+        const getSemanticAngle = (base: string) => {
+          switch (base) {
+            case '06:00': return '06:00 (Direct Front / Primary Facade View)';
+            case '04:30': return '04:30 (Front-Right Corner View / 2-Point Perspective)';
+            case '03:00': return '03:00 (Direct Right Side / Profile View)';
+            case '01:30': return '01:30 (Rear-Right Corner View / 2-Point Perspective)';
+            case '12:00': return '12:00 (Direct Rear / Complete Back View)';
+            case '10:30': return '10:30 (Rear-Left Corner View / 2-Point Perspective)';
+            case '09:00': return '09:00 (Direct Left Side / Profile View)';
+            case '07:30': return '07:30 (Front-Left Corner View / 2-Point Perspective)';
+            default: return base;
+          }
+        };
+        const viewsToGenerate = [{
+          name: "Custom View",
+          angle: ANGLES[angleIndex],
+          altitude: ALTITUDES[altitudeIndex].label,
+          lens: LENSES[lensIndex].label,
+          distance: "Standard",
+          scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
+        }];
+
+        let actualImageSrc = sourceItem.src;
+        if (sourceItem.type === 'generated' && sourceItem.motherId) {
+          const motherItem = canvasItems.find(i => i.id === sourceItem.motherId);
+          if (motherItem) actualImageSrc = motherItem.src;
+        }
+
+        const base64Data = actualImageSrc.split(',')[1];
+        const mimeType = actualImageSrc.split(';')[0].split(':')[1];
+
+        const generatePromises = viewsToGenerate.map(async (viewConfig) => {
+          const currentTime = TIMES[timeIndex];
+          const layerB_viewpoint = `
+# ACTION PROTOCOL (MANDATORY EXECUTION WORKFLOW)
+## Pre-Step: Reality Anchoring & Camera Delta Calculation
+- V₀ (Current Camera Position): Angle: ${v0_angle} o'clock | Altitude: ${v0_altitude} | Lens: ${v0_lens} | Time: ${v0_time}
+- V₁ (Target Camera Position): Angle: ${getSemanticAngle(viewConfig.angle)} | Altitude: ${viewConfig.altitude} | Lens: ${viewConfig.lens} | Time: ${currentTime}
+- Δ Movement Vector: Orbit from ${v0_angle} → ${viewConfig.angle}
+- Target Vector: ${getSemanticAngle(viewConfig.angle)}
+## Step 2: Scenario Mapping & Optical Engineering
+- Scenario: ${viewConfig.scenario} | Lens: ${viewConfig.lens} | Time of Day: ${currentTime}`;
+
+          const layerC_property = elevationParams ? `
+## Step 5: Structural & Material Parameters (PHASE 2 AEPL Data — Immutable)
+- Mass Typology: ${elevationParams['1_macro_geometry']?.mass_typology || 'N/A'}
+- Roof Form: ${elevationParams['1_macro_geometry']?.roof_form || 'N/A'}
+- Base Material: ${elevationParams['3_material']?.base_material_type || 'N/A'}
+- Fenestration: ${elevationParams['4_fenestration']?.fenestration_type || 'N/A'}` : '';
+
+          const layerC_blindspot = `## Step 3: Layering & Blind Spot Inference (Void Mitigation)
+- Context Void Mitigation: Synchronize Foreground/Background.
+- Material Injection: Lock original textures. Relighting only for solar angle (${currentTime}).`;
+
+          let activeElevationSlots = getElevationSlot(viewConfig.angle);
+          if (activeElevationSlots.length === 0) activeElevationSlots = getElevationSlot("06:00");
+          const elevationLabel = activeElevationSlots.map(s => s.label).join('+');
+
+          const finalPrompt = `
+# SYSTEM: 5-Point Integrated Viewpoint Simulation Architect (5-IVSP)
+# GOAL: Change the angle of view of the provided architectural image.
+- Geometric Sanctuary: The building's proportions are Immutable Constants.
+# INPUT IMAGES: IMAGE 1 (Primary) + IMAGE 2 (Geometric Reference: ${elevationLabel})
+${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}
+[GENERATE IMAGE NOW]`.trim();
+
+          const runGen = async (modelName: string) => {
+            const parts: any[] = [{ inlineData: { data: base64Data, mimeType: mimeType } }];
+            if (elevationImages) {
+              for (const slot of activeElevationSlots) {
+                const imgData = (elevationImages as any)[slot.label.toLowerCase()];
+                if (imgData) parts.push({ inlineData: { data: imgData.split(',')[1], mimeType: 'image/png' } });
+              }
+            }
+            parts.push({ text: finalPrompt });
+            const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
+            if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) return false;
+
+            if (response.candidates?.[0]?.content?.parts) {
+              for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData) {
+                  const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                  await new Promise<void>((resolve) => {
+                    const img = new Image();
+                    img.onload = () => {
+                      const updatedOpticalParams = { angle: ANGLES[angleIndex], altitude: ALTITUDES[altitudeIndex].label, lens: LENSES[lensIndex].label, time: TIMES[timeIndex] };
+                      const newGenItem: CanvasItem = {
+                        id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                        type: 'generated',
+                        src: generatedSrc,
+                        x: 0, y: sourceItem.y,
+                        width: img.width * 0.3, height: img.height * 0.3,
+                        motherId: sourceItem.motherId || sourceItem.id,
+                        parameters: {
+                          angleIndex, altitudeIndex, lensIndex, timeIndex,
+                          analyzedOpticalParams: updatedOpticalParams,
+                          elevationParams, sitePlanImage, elevationImages
+                        }
+                      };
+                      setCanvasItems(prev => {
+                        setHistoryStates(prevH => [...prevH, prev]);
+                        const siblings = prev.filter(i => i.type === 'generated' && (i.motherId === sourceItem.id || i.motherId === sourceItem.motherId));
+                        if (siblings.length === 0) {
+                          newGenItem.x = sourceItem.x + sourceItem.width + 120;
+                          newGenItem.y = (sourceItem.y + sourceItem.height * 0.25) - newGenItem.height;
+                        } else {
+                          const bottomMost = siblings.reduce((p, c) => (c.y + c.height > p.y + p.height) ? c : p, siblings[0]);
+                          newGenItem.x = bottomMost.x;
+                          newGenItem.y = bottomMost.y + bottomMost.height + 96;
+                        }
+                        return [...prev, newGenItem];
+                      });
+                      setSelectedItemIds([newGenItem.id]);
+                      if (!isFirstTime) setActiveTab('result');
+                      resolve();
+                    };
+                    img.src = generatedSrc;
+                  });
+                  return true;
+                }
+              }
+            }
+            return false;
+          };
+
+          try {
+            const success = await runGen(IMAGE_GEN);
+            if (!success) throw new Error("Fallback needed");
+          } catch (e) {
+            await runGen(IMAGE_GEN_FALLBACK).catch(err => console.error("Generation failed", err));
+          }
+        });
+        await Promise.all(generatePromises);
+      } catch (error) {
+        console.error("Generation Error:", error);
+        alert("An error occurred during generation.");
+      } finally {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
+    }
+
+    else if (selectedFunction === 'SKETCH TO IMAGE') {
+      if (!sketchMode || !sketchStyle) {
+        alert("Please select both MODE and STYLE.");
+        return;
+      }
+
+      setIsGenerating(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const styleInfo = STYLE_DESCRIPTIONS[sketchStyle];
+        const keywordsStr = styleInfo ? styleInfo.keywords.map(k => k.en).join(', ') : '';
+
+        const systemPrompt = `
+          [Architecture Blueprint Protocol - Sketch to Image V250]
+          TASK: Transform the user's architectural sketch or description into a completed, realistic building.
+          
+          [CORE PRINCIPLES]
+          - Ontological Status: The output must be a "Finished Building Photography."
+          - Architectural Style: ${styleInfo?.title.en} (${keywordsStr}).
+          - Mode: ${sketchMode} (${sketchMode === 'CONCEPT' ? 'Focus on creative suggestion and atmosphere.' : 'Focus on preserving the original sketch geometry strictly.'})
+          
+          [SPECIFICATION]
+          - Format: High-quality architectural rendering (Fujifilm GFX 100S, 8k resolution).
+          - Aspect Ratio: ${aspectRatio}
+          - Quality: ${resolution}
+          - Lighting: Pure architectural light, matching the style description.
+          
+          [CONSTRAINTS]
+          - NO text, NO labels, NO humans unless specified.
+          - Clean orthographic-leaning perspective.
+        `.trim();
+
+        const finalPrompt = `
+          User Description: ${sketchPrompt || "A generic building in the specified style."}
+          Please generate the image now adhering to the Blueprint Protocol.
+        `.trim();
+
+        const runGen = async (modelName: string) => {
+          const parts: any[] = [{ text: systemPrompt }, { text: finalPrompt }];
+          
+          // If we have a selected image, we can use it as a reference (sketch)
+          const sourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : null;
+          if (sourceItem) {
+            const base64Data = sourceItem.src.split(',')[1];
+            const mimeType = sourceItem.src.split(';')[0].split(':')[1];
+            parts.unshift({ inlineData: { data: base64Data, mimeType: mimeType } });
+          }
+
+          const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
+          if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) return false;
+
+          if (response.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+              if (part.inlineData) {
+                const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                await new Promise<void>((resolve) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    const newGenItem: CanvasItem = {
+                      id: `sketch-${Date.now()}`,
+                      type: 'generated',
+                      src: generatedSrc,
+                      x: sourceItem ? sourceItem.x + sourceItem.width + 120 : 0,
+                      y: sourceItem ? sourceItem.y : 0,
+                      width: img.width * 0.4,
+                      height: img.height * 0.4,
+                      motherId: sourceItem ? (sourceItem.motherId || sourceItem.id) : null,
+                      parameters: {
+                        angleIndex: 4, altitudeIndex: 2, lensIndex: 1, timeIndex: 2,
+                        analyzedOpticalParams: { angle: '06:00', altitude: '1.6m', lens: '24mm', time: '12:00' },
+                        elevationParams: null
+                      }
+                    };
+                    setCanvasItems(prev => {
+                      setHistoryStates(prevH => [...prevH, prev]);
+                      return [...prev, newGenItem];
+                    });
+                    setSelectedItemIds([newGenItem.id]);
+                    resolve();
+                  };
+                  img.src = generatedSrc;
+                });
+                return true;
+              }
+            }
+          }
+          return false;
+        };
+
+        const success = await runGen(IMAGE_GEN);
+        if (!success) await runGen(IMAGE_GEN_FALLBACK);
+
+      } catch (err) {
+        console.error("Sketch to Image error", err);
+        alert("Sketch generation failed.");
+      } finally {
+        setIsGenerating(false);
+        abortControllerRef.current = null;
+      }
+    }
+
+    else if (selectedFunction === 'PLANNERS') {
+      if (!plannerCode) {
+        alert("Please enter the project code.");
+        return;
+      }
+      setIsGenerating(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setAnalysisStep('Expert team briefing started...');
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const agentsStr = plannerAgents.length > 0 ? plannerAgents.join(', ') : 'All Experts';
+        const prompt = `
+          [Architectural Planner Expert Team - System Protocol V250]
+          You are a team of expert planners: ${agentsStr}.
+          Analyze the following project code/description: "${plannerCode}"
+          Provide a professional briefing and strategic feedback. 
+          Respond in a concise, authoritative architectural consultant tone.
+        `;
+        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: prompt }] } });
+        if (controller.signal.aborted) return;
+        const feedback = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        console.log("PLANNER FEEDBACK:", feedback);
+        alert("Planner feedback received. Check console for details.");
+      } catch (err) {
+        if (err.name !== 'AbortError') console.error("Planner error", err);
+      } finally {
+        setIsGenerating(false);
+        setAnalysisStep('');
+        abortControllerRef.current = null;
+      }
+    }
+
+    else if (selectedFunction === 'PRINT') {
+      if (!printPrompt) {
+        alert("Please enter the printing requirements.");
+        return;
+      }
+      setIsGenerating(true);
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setAnalysisStep(`Generating ${printPages} pages of ${printTemplate}...`);
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        const prompt = `
+          [Architectural Print Engine - System Protocol V250]
+          Generate a ${printTemplate} document based on: "${printPrompt}"
+          Number of pages requested: ${printPages}.
+          Output as a structured textual report.
+        `;
+        const result = await ai.models.generateContent({ model: ANALYSIS, contents: { parts: [{ text: prompt }] } });
+        if (controller.signal.aborted) return;
+        const feedback = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        console.log("PRINT OUTPUT:", feedback);
+        alert("Print report generated successfully.");
+      } catch (err) {
+        if (err.name !== 'AbortError') console.error("Print error", err);
+      } finally {
+        setIsGenerating(false);
+        setAnalysisStep('');
+        abortControllerRef.current = null;
+      }
+    }
+  };
+
+  // V157: Cancel handler
+  const handleCancelGenerate = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setIsGenerating(false);
+      console.log("[V157] Generation canceled by user.");
+    }
+  };
+
+  const currentSourceItem = selectedItemIds[0] ? canvasItems.find(item => item.id === selectedItemIds[0]) : (canvasItems.length > 0 ? canvasItems[0] : null);
+  const isSelectedItemUpload = currentSourceItem?.type === 'upload';
+  const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === currentSourceItem?.id || (i.motherId === undefined && i.id === currentSourceItem?.id)));
+
+  // V162: 파생 이미지(Generated Item) 슬라이더 조작 비활성화 롤백
+  const isGeneratedItemSelected = currentSourceItem?.type === 'generated';
+  const areSlidersLocked = isAnalyzing || isGenerating || isGeneratedItemSelected;
+
+  return (
+    <div className={`
+      h-[100dvh] w-full flex flex-col overflow-hidden select-none touch-none
+      bg-[#fcfcfc] dark:bg-[#050505] text-black dark:text-white
+      ${isLassoing ? 'cursor-crosshair' : ''}
+    `}>
+      {/* HEADER */}
+      <header className="h-[54px] shrink-0 flex justify-between items-center px-4 border-b border-black/10 dark:border-white/10 bg-white/90 dark:bg-black/90 backdrop-blur-sm transition-colors duration-300">
+        <div className="flex items-center gap-3">
+          <span className="text-[1.575rem] font-display font-bold tracking-[0.0125em] uppercase leading-tight pt-1">CAI</span>
+          <span className="text-[1.575rem] font-display font-bold tracking-[0.0125em] uppercase leading-tight pt-1">CANVAS</span>
+        </div>
+        <div className="flex items-center gap-6 font-mono text-xs leading-normal tracking-wide uppercase">
+          <button onClick={toggleTheme} className="hover:opacity-60 transition-opacity">
+            {theme === 'light' ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+        </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <main className="flex flex-1 min-h-0 w-full flex-col landscape:flex-row overflow-hidden relative">
+
+        <section
+          ref={canvasRef as React.RefObject<HTMLElement>}
+          className={`flex-1 relative overflow-hidden transition-all duration-300 ${canvasMode === 'pan' ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onDragStart={(e) => e.preventDefault()}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {/* V114: SVG Overlay Layer for UI helpers (Lasso, etc) */}
+          <div className="absolute inset-0 pointer-events-none z-[100]">
+            {/* Lasso Selection SVG- V188: Corrected Coordinate System */}
+            {isLassoing && lassoPath.length > 1 && (
+              <svg
+                key="lasso-svg"
+                className="absolute inset-0 w-full h-full pointer-events-none z-[100]"
+                style={{ overflow: 'visible' }}
+              >
+                <g style={{ transform: `translate(${canvasOffset.x + window.innerWidth / 2}px, ${canvasOffset.y + window.innerHeight / 2}px) scale(${canvasZoom / 100})` }}>
+                  <path
+                    d={`M ${lassoPath.map(p => `${p.x} ${p.y}`).join(' L ')} Z`}
+                    fill="rgba(30, 144, 255, 0.05)"
+                    stroke="rgb(30, 144, 255)"
+                    strokeWidth={2 / (canvasZoom / 100)}
+                    strokeDasharray={`${4 / (canvasZoom / 100)} ${4 / (canvasZoom / 100)}`}
+                  />
+                </g>
+              </svg>
+            )}
+          </div>
+
+          {/* V173/V174: Integrated Left Tool Bar Area - Now FIXED OUTSIDE Scale Layer */}
+          <div className="absolute left-[12px] top-1/2 -translate-y-1/2 z-30 flex flex-col items-center pointer-events-none">
+            {/* Main Control Bar */}
+            <div
+              className={`
+                flex flex-col items-center gap-2
+                bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 pointer-events-auto
+                transition-all duration-300 rounded-full py-2 w-11 backdrop-blur-sm
+              `}
+              style={{
+                boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
+              }}
+            >
+              {/* 1. 도구 모드 버튼: 커서/패닝 통합 토글 + Lasso (V202) */}
+              <button
+                onClick={() => setCanvasMode(canvasMode === 'select' ? 'pan' : 'select')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${(canvasMode === 'select' || canvasMode === 'pan') ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title={canvasMode === 'pan' ? 'Pan Mode (click to switch to Cursor)' : 'Cursor Mode (click to switch to Pan)'}
+              >
+                {canvasMode === 'pan' ? <Hand size={18} /> : <MousePointer2 size={18} />}
+              </button>
+              <button
+                onClick={() => setCanvasMode('lasso')}
+                className={`w-8 h-8 flex items-center justify-center rounded-full transition-all hover:cursor-pointer ${canvasMode === 'lasso' ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                title="Lasso Select"
+              >
+                <Lasso size={18} />
+              </button>
+
+              <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
+
+              {/* 2. Undo & Redo Buttons */}
+              <button
+                onClick={handleUndo}
+                disabled={historyStates.length === 0}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${historyStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5 hover:cursor-pointer'}`}
+                title="Undo"
+              >
+                <Undo size={18} />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={redoStates.length === 0}
+                className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${redoStates.length === 0 ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5 hover:cursor-pointer'}`}
+                title="Redo"
+              >
+                <Redo size={18} />
+              </button>
+
+              <div className="w-6 h-[1px] bg-black/10 dark:bg-white/10 my-1" />
+
+              {/* 3. Search (Expandable Zoom Interface) */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsSearchExpanded(!isSearchExpanded)}
+                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-all ${isSearchExpanded ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-black/5 dark:hover:bg-white/5 hover:cursor-pointer'}`}
+                  title="Zoom Controls"
+                >
+                  <Search size={16} />
+                </button>
+
+                {/* Horizontal Expanded Bar */}
+                {isSearchExpanded && (
+                  <div
+                    className="absolute left-[calc(100%+12px)] top-1/2 -translate-y-1/2 flex items-center bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 rounded-full h-11 px-2 backdrop-blur-sm"
+                    style={{ boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
+                  >
+                    {/* Fit Screen (Corners only icon) */}
+                    <button
+                      onClick={handleFocus}
+                      className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors hover:cursor-pointer"
+                      title="Fit to Screen"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M15 3h6v6M9 21H3v-6M21 15v6h-6M3 9V3h6" />
+                      </svg>
+                    </button>
+
+                    <div className="w-[1px] h-7 bg-black/10 dark:bg-white/10 mx-1" />
+
+                    {/* Zoom Level */}
+                    <div className="flex items-center">
+                      <button onClick={() => zoomStep(-1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors hover:cursor-pointer">−</button>
+                      <div className="min-w-[50px] text-center font-mono text-xs font-bold">{Math.round(canvasZoom)}%</div>
+                      <button onClick={() => zoomStep(1)} className="w-9 h-9 flex items-center justify-center rounded-full font-mono text-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors hover:cursor-pointer">+</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* V174: Relocated Independent Upload Button (Desired 18px gap between circles) */}
+            {/* Toolbar has py-2 (8px), so mt-[10px] makes total 18px gap */}
+            <div className="mt-[10px] flex flex-col items-center">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-11 h-11 flex items-center justify-center rounded-full bg-black text-white hover:bg-neutral-800 transition-colors shadow-lg pointer-events-auto hover:cursor-pointer"
+                title="Upload Image"
+              >
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
+                  <line x1="16" y1="5" x2="22" y2="5" />
+                  <line x1="19" y1="2" x2="19" y2="8" />
+                  <path d="M7 16l3-3 2 2 4-4 3 3" />
+                </svg>
+              </button>
+              <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+            </div>
+          </div>
+
+          <div
+            className="absolute inset-0 transition-transform duration-75 ease"
+            style={{
+              transform: `translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom / 100})`,
+              transformOrigin: 'center'
+            }}
+          >
+            {/* V201-3: Connection Lines - full-size SVG for cross-browser rendering */}
+            <svg
+              className="absolute pointer-events-none"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 9, pointerEvents: 'none', overflow: 'visible' }}
+            >
+              {canvasItems.map((item) => {
+                if (!item.motherId) return null;
+                const mother = canvasItems.find(i => i.id === item.motherId);
+                if (!mother) return null;
+
+                // V202-2: Scale Layer CSS transform already handles canvasOffset + scale
+                // Use pure canvas coordinates only (no double-application)
+                const x1 = window.innerWidth / 2 + mother.x + mother.width;
+                const y1 = window.innerHeight / 2 + mother.y + mother.height / 2;
+                const x2 = window.innerWidth / 2 + item.x;
+                const y2 = window.innerHeight / 2 + item.y + item.height / 2;
+
+                return (
+                  <line
+                    key={`line-${item.id}`}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="rgba(0, 0, 0, 0.5)"
+                    strokeWidth="1"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                );
+              })}
+            </svg>
+
+            {/* Transform Wrapper */}
+            <div
+              className="w-full h-full flex items-center justify-center relative touch-none pointer-events-none"
+            >
+              {/* Infinite Composite Grid Background (5x5 Module, 60px/12px) */}
+              <div
+                className="absolute pointer-events-none"
+                style={{
+                  top: '-15000px', left: '-15000px',
+                  width: '30000px', height: '30000px',
+                  backgroundColor: 'rgba(0, 0, 255, 0.01)',
+                  backgroundImage: `
+                  linear-gradient(to right, rgba(128,128,128,0.1) 1px, transparent 1px),
+                  linear-gradient(to bottom, rgba(128,128,128,0.1) 1px, transparent 1px),
+                  linear-gradient(to right, rgba(128,128,128,0.2) 1px, transparent 1px),
+                  linear-gradient(to bottom, rgba(128,128,128,0.2) 1px, transparent 1px)
+                `,
+                  backgroundSize: '12px 12px, 12px 12px, 60px 60px, 60px 60px',
+                  zIndex: -1
+                }}
+              />
+
+              {/* Render Canvas Items (V56: Standardized Center-Origin Rendering) */}
+              {canvasItems.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    position: 'absolute',
+                    // V56 Fix: Align item 0,0 with screen center (50%) to match getCanvasCoords math
+                    left: `calc(50% + ${item.x}px)`,
+                    top: `calc(50% + ${item.y}px)`,
+                    width: item.width,
+                    height: item.height,
+                    zIndex: selectedItemIds.includes(item.id) ? 20 : 10,
+                    // Disable pointer events on items during PAN mode to allow background panning
+                    pointerEvents: canvasMode === 'pan' ? 'none' : 'auto',
+                    cursor: 'inherit'
+                  }}
+                >
+                  <img
+                    src={item.src}
+                    alt={item.id}
+                    className="w-full h-full object-contain pointer-events-none shadow-xl border border-black/5 dark:border-white/5"
+                    referrerPolicy="no-referrer"
+                    draggable={false}
+                  />
+
+                  {/* V136: Hide labels if zoom is 30% or less (V173 adjusted) */}
+                  {(() => {
+                    if (canvasZoom <= 30) return null;
+                    const labelText = item.type === 'upload'
+                      ? 'ORIGINAL'
+                      : (() => {
+                        const siblings = canvasItems.filter(i => i.type === 'generated' && (i.motherId === item.motherId || i.motherId === item.id));
+                        const viewIdx = siblings.findIndex(s => s.id === item.id);
+                        return `VIEWPOINT ${String(viewIdx + 1).padStart(2, '0')}`;
+                      })();
+                    return (
+                      <div
+                        className="absolute bottom-0 left-1/2 pointer-events-none z-[25] origin-top"
+                        style={{
+                          transform: `translateX(-50%) translateY(100%) scale(${1 / (canvasZoom / 100)})`,
+                          paddingTop: '12px',
+                          lineHeight: 1
+                        }}
+                      >
+                        <span className="font-mono text-[15px] tracking-widest uppercase opacity-40 whitespace-nowrap">
+                          {labelText}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Selection Overlay (Blue Border & Circle Handles) */}
+                  {selectedItemIds.includes(item.id) && (
+                    <div
+                      className="absolute -inset-[1px] pointer-events-none border-[#1d4ed8] z-[30]"
+                      style={{
+                        // 1.2pt ≈ 1.6px
+                        borderWidth: `${1.6 / (canvasZoom / 100)}px`
+                      }}
+                    >
+                      {/* V80/V81: Floating Control Bar for All Images */}
+                      <div
+                        className={`absolute flex items-center bg-white/70 dark:bg-black/70 backdrop-blur-md z-[40] px-1.5 rounded-full pointer-events-auto transition-all duration-300`}
+                        style={{
+                          top: `-${56 / (canvasZoom / 100)}px`,
+                          right: 0,
+                          height: `${44 / (canvasZoom / 100)}px`,
+                          boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
+                        }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        {/* V182: Add Copy (Duplicate) button at the leftmost */}
+                        <button
+                          onClick={() => {
+                            const newItem: CanvasItem = {
+                              ...item,
+                              id: `${item.id}-copy-${Date.now()}`,
+                              x: item.x + item.width + 1,
+                              y: item.y,
+                              motherId: item.id // Maintain ancestry for connection lines
+                            };
+                            setCanvasItems(prev => [...prev, newItem]);
+                            setSelectedItemIds([]); // V195: Initial state deactivated
+                          }}
+                          className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                          style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                          title="복제 (Duplicate)"
+                        >
+                          <svg width={12 / (canvasZoom / 100)} height={12 / (canvasZoom / 100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                        </button>
+                        <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+
+                        {item.type === 'generated' && (
+                          /* V82: Add Download button for generated images */
+                          <>
+                            <a
+                              href={item.src}
+                              download="simulation.png"
+                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                              title="다운로드"
+                            >
+                              <Download size={14 / (canvasZoom / 100)} />
+                            </a>
+                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                          </>
+                        )}
+                        {/* V180: Library button enabled concurrently with GENERATE button */}
+                        <button
+                          onClick={() => {
+                            const isOpening = openLibraryItemId !== item.id;
+                            setOpenLibraryItemId(isOpening ? item.id : null);
+                            if (isOpening) setArtboardPage(1);
+                          }}
+                          disabled={!item.parameters?.analyzedOpticalParams && item.type !== 'generated'}
+                          className={`flex items-center justify-center transition-all rounded-full ${openLibraryItemId === item.id ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'} ${(!item.parameters?.analyzedOpticalParams && item.type !== 'generated') ? 'opacity-20 cursor-not-allowed' : 'opacity-100'}`}
+                          style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                          title="라이브러리 (아트보드)"
+                        >
+                          <Book size={12 / (canvasZoom / 100)} />
+                        </button>
+                        <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                        <button
+                          onClick={() => {
+                            setHistoryStates(prevH => [...prevH, canvasItems]);
+                            setRedoStates([]);
+                            setCanvasItems(prev => prev.filter(i => i.id !== item.id && i.motherId !== item.id));
+                            setSelectedItemIds([]);
+                          }}
+                          className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors text-red-500 rounded-full"
+                          style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                          title="삭제"
+                        >
+                          <Trash2 size={12 / (canvasZoom / 100)} />
+                        </button>
+                      </div>
+
+                      {/* V75/V81/V160: Item-bound Library Artboard */}
+                      {openLibraryItemId === item.id && (
+                        <div
+                          className="absolute flex flex-col bg-white/90 dark:bg-[#1E1E1E]/90 backdrop-blur-xl shadow-xl rounded-2xl p-6 pointer-events-auto cursor-default"
+                          style={{
+                            left: 'calc(100% + 12px)',
+                            top: 0,
+                            width: '800px',
+                            height: '600px',
+                            border: 'none',
+                          }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          {/* V180: Header & Tabs */}
+                          <div className="flex justify-between items-center mb-4 shrink-0">
+                            <span className="font-mono text-xs tracking-widest uppercase font-bold text-black/70 dark:text-white/70">
+                              {artboardPage === 1 && "1. ANALYSIS REPORT"}
+                              {artboardPage === 2 && "2. FRONT VIEW (06:00)"}
+                              {artboardPage === 3 && "3. RIGHT VIEW (03:00)"}
+                              {artboardPage === 4 && "4. REAR VIEW (12:00)"}
+                              {artboardPage === 5 && "5. LEFT VIEW (09:00)"}
+                              {artboardPage === 6 && "6. TOP VIEW"}
+                            </span>
+                            <div className="flex gap-2">
+                              {[1, 2, 3, 4, 5, 6].map((p) => (
+                                <button
+                                  key={p}
+                                  onClick={() => setArtboardPage(p)}
+                                  className={`w-8 h-8 flex items-center justify-center rounded-full text-xs font-mono transition-colors ${artboardPage === p ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10'}`}
+                                >
+                                  {p}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* V180: Content */}
+                          <div className="flex-1 w-full border border-black/10 dark:border-white/10 rounded-xl overflow-hidden bg-black/5 flex">
+                            {artboardPage === 1 ? (
+                              /* Page 1: Extracted Details (Analysis Report) */
+                              <div className="flex w-full h-full">
+                                {/* Left: Source Image */}
+                                <div className="w-[45%] h-full p-4 border-r border-black/10 dark:border-white/10 flex flex-col">
+                                  <span className="font-mono text-[10px] uppercase opacity-50 mb-3 tracking-widest block text-center">Source Image</span>
+                                  <div className="flex-1 w-full relative flex items-center justify-center bg-black/5 dark:bg-white/5 rounded-lg border border-black/5 dark:border-white/5 p-2 overflow-hidden">
+                                    <img src={item.src} className="max-w-full max-h-full object-contain rounded drop-shadow-md" alt="Source" />
+                                  </div>
+                                </div>
+
+                                {/* Right: Extracted Text Parameters */}
+                                <div className="w-[55%] h-full p-6 overflow-y-auto font-mono text-[11px] leading-relaxed custom-scrollbar">
+                                  <span className="font-mono text-[10px] uppercase opacity-50 block mb-4 tracking-widest">Extracted Parameters</span>
+
+                                  {item.parameters?.analyzedOpticalParams && (
+                                    <div className="mb-6">
+                                      <h4 className="font-bold mb-2 text-blue-600 dark:text-blue-400 border-b border-black/10 dark:border-white/10 pb-1">Optical Parameters</h4>
+                                      <pre className="whitespace-pre-wrap text-[10px] bg-white/50 dark:bg-black/50 p-3 rounded-lg border border-black/5 dark:border-white/5">
+                                        {JSON.stringify(item.parameters.analyzedOpticalParams, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+
+                                  {item.parameters?.elevationParams ? (
+                                    <div>
+                                      <h4 className="font-bold mb-2 text-teal-600 dark:text-teal-400 border-b border-black/10 dark:border-white/10 pb-1">Architectural Parameters (AEPL)</h4>
+                                      <pre className="whitespace-pre-wrap text-[10px] bg-white/50 dark:bg-black/50 p-3 rounded-lg border border-black/5 dark:border-white/5">
+                                        {JSON.stringify(item.parameters.elevationParams, null, 2)}
+                                      </pre>
+                                    </div>
+                                  ) : (
+                                    <div className="mt-4 p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-center">
+                                      No AEPL Parameters Found
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              /* Pages 2-5: Elevation Views */
+                              <div className="relative w-full h-full flex items-center justify-center p-4">
+                                {(() => {
+                                  const views = item.parameters?.elevationImages;
+                                  let displayImg = null;
+                                  if (artboardPage === 2) displayImg = views?.front;
+                                  if (artboardPage === 3) displayImg = views?.right;
+                                  if (artboardPage === 4) displayImg = views?.rear;
+                                  if (artboardPage === 5) displayImg = views?.left;
+                                  if (artboardPage === 6) displayImg = views?.top;
+
+                                  if (displayImg) {
+                                    return <img src={displayImg} className="max-w-full max-h-full object-contain mix-blend-multiply dark:mix-blend-screen" alt={`Page ${artboardPage}`} />;
+                                  } else {
+                                    return (
+                                      <div className="flex flex-col items-center gap-4">
+                                        <Loader2 size={32} className="animate-spin text-black/20 dark:text-white/20" />
+                                        <p className="font-mono opacity-40 uppercase tracking-widest text-[12px]">Generating Elevation Data...</p>
+                                      </div>
+                                    );
+                                  }
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* V156: Reverted to original white circular Loader2 */}
+                      {isGenerating && selectedItemIds.includes(item.id) && (
+                        <div className="absolute inset-0 z-[50] flex flex-col items-center justify-center bg-white/50 backdrop-blur-md pointer-events-auto">
+                          <Loader2
+                            size={42}
+                            className="animate-spin text-white"
+                          />
+                        </div>
+                      )}
+                      {/* Corner Handles (Scale Invariant Circles, 4-corner resizable) */}
+                      {[
+                        { top: true, left: true, dx: -1, dy: -1, cursor: 'nwse-resize' }, // top-left
+                        { top: true, right: true, dx: 1, dy: -1, cursor: 'nesw-resize' }, // top-right
+                        { bottom: true, left: true, dx: -1, dy: 1, cursor: 'nesw-resize' }, // bottom-left
+                        { bottom: true, right: true, dx: 1, dy: 1, cursor: 'nwse-resize' }, // bottom-right
+                      ].map((pos, idx) => {
+                        const s = 1 / (canvasZoom / 100);
+                        const size = 12 * s;
+                        const style: any = {
+                          width: size,
+                          height: size,
+                          borderWidth: 1.6 * s,
+                          position: 'absolute',
+                          zIndex: 60,
+                          backgroundColor: 'white',
+                          borderColor: '#808080',
+                          borderRadius: '999px',
+                          top: pos.top ? -size / 2 : 'auto',
+                          bottom: pos.bottom ? -size / 2 : 'auto',
+                          left: pos.left ? -size / 2 : 'auto',
+                          right: pos.right ? -size / 2 : 'auto',
+                          pointerEvents: 'auto',
+                          cursor: pos.cursor,
+                        };
+                        return <div key={idx} className="resize-handle" data-dx={pos.dx} data-dy={pos.dy} style={style} />;
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* RIGHT SIDEBAR WRAPPER (V177: Detached Header & Minimal Footer) */}
+        <div className="absolute top-0 right-0 h-full z-[110] pointer-events-none flex justify-end p-[12px]">
+          <div className={`
+            relative h-full transition-all duration-500 ease-in-out flex flex-col items-end
+            ${isRightPanelOpen ? 'w-[284px]' : 'w-0'}
+          `}>
+
+            {/* V203: Detached Header Row - Function Selector Button + PanelLeft */}
+            <div className={`
+              w-[284px] shrink-0 h-[44px] flex items-center gap-[12px] mb-[12px] transition-all duration-500
+            `}>
+              <button
+                onClick={() => {
+                  if (!selectedFunction) {
+                    // 첫 화면: 목록 없이 버튼만 접힘
+                    setIsFunctionSelectorOpen(false);
+                  } else {
+                    setIsFunctionSelectorOpen(prev => !prev);
+                  }
+                }}
+                className={`
+                  flex-1 h-full rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center justify-between px-5 backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto
+                  ${isRightPanelOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+                `}
+              >
+                <span className="font-display tracking-widest uppercase font-medium text-[15px]">
+                  {isFunctionSelectorOpen ? 'SELECT TOOLS' : (selectedFunction || 'SELECT TOOLS')}
+                </span>
+                {isFunctionSelectorOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+              </button>
+
+              <button
+                onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+                className={`
+                  w-11 h-11 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center justify-center backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto
+                `}
+              >
+                {isRightPanelOpen ? <PanelLeft size={18} /> : <PanelLeft size={18} className="rotate-180" />}
+              </button>
+            </div>
+
+            <div className={`
+              w-[228px] mr-[56px] flex flex-col gap-[6px] pb-[3px] transition-all duration-300 overflow-hidden shrink-0
+              ${isRightPanelOpen && isFunctionSelectorOpen
+                ? 'max-h-[500px] opacity-100 mb-[12px] translate-y-0'
+                : 'max-h-0 opacity-0 mb-0 -translate-y-4 pointer-events-none'}
+            `}>
+              {['PLANNERS', 'SKETCH TO IMAGE', 'CHANGE VIEWPOINT', 'PRINT'].map(fn => (
+                <button
+                  key={fn}
+                  onClick={() => {
+                    setSelectedFunction(fn);
+                    setIsFunctionSelectorOpen(false);
+                  }}
+                  className="h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto"
+                >
+                  <span className="font-display tracking-widest uppercase font-medium text-[15px]">{fn}</span>
+                </button>
+              ))}
+              {/* V130: + ADD TOOLS - empty hover-only button */}
+              <button
+                className="h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto"
+              >
+                <span className="font-display tracking-widest uppercase font-medium text-[15px]">+ ADD TOOLS</span>
+              </button>
+            </div>
+
+            {/* V209: Shared panel container for all function panels */}
+            <div className="flex-1 relative w-[284px]">
+
+              {/* V177 CHANGE VIEWPOINT Panel */}
+              <div className={`
+                absolute inset-0 transition-all duration-500 ease-in-out
+                ${!isRightPanelOpen
+                  ? 'translate-x-10 opacity-0 pointer-events-none'
+                  : (isFunctionSelectorOpen || selectedFunction !== 'CHANGE VIEWPOINT')
+                    ? 'translate-y-10 opacity-0 pointer-events-none'
+                    : 'translate-0 opacity-100 pointer-events-auto'}
+              `}>
+                <aside
+                  className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10"
+                >
+                  <div className="flex flex-col h-full">
+                    {/* Master Box Container (Scrollable) */}
+                    <div className="flex-1 overflow-y-auto px-4 pb-4 pt-4 min-h-0 flex flex-col gap-5 custom-scrollbar">
+
+                      {/* V124 Site Plan Indicator (Replaced with new minimal version) */}
+                      <div>
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-3">Viewpoint</span>
+                        <div className="flex-shrink-0 w-full aspect-square mx-auto pointer-events-none rounded-[20px] bg-white/30 dark:bg-black/30 border border-black/5 dark:border-white/5">
+                          <SitePlanDiagram
+                            angle={ANGLES[angleIndex]}
+                            isAnalyzing={isAnalyzing}
+                            analysisStep={analysisStep}
+                            lens={LENSES[lensIndex].value}
+                            sitePlanImage={sitePlanImage}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Sliders */}
+                      <div className={`flex flex-col space-y-4 px-1 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
+                        <div>
+                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
+                            <span className="opacity-70 uppercase tracking-widest">Angle</span>
+                            <span className="font-bold">{ANGLES[angleIndex]}</span>
+                          </div>
+                          <input type="range" min="0" max={ANGLES.length - 1} step="1" value={angleIndex} onChange={(e) => setAngleIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
+                        </div>
+                        <div>
+                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
+                            <span className="opacity-70 uppercase tracking-widest">Altitude</span>
+                            <span className="font-bold">{ALTITUDES[altitudeIndex].label}</span>
+                          </div>
+                          <input type="range" min="0" max={ALTITUDES.length - 1} step="1" value={altitudeIndex} onChange={(e) => setAltitudeIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
+                        </div>
+                        <div>
+                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
+                            <span className="opacity-70 uppercase tracking-widest">Lens</span>
+                            <span className="font-bold">{LENSES[lensIndex].label}</span>
+                          </div>
+                          <input type="range" min="0" max={LENSES.length - 1} step="1" value={lensIndex} onChange={(e) => setLensIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
+                        </div>
+                        <div>
+                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
+                            <span className="opacity-70 uppercase tracking-widest">Time</span>
+                            <span className="font-bold">{TIMES[timeIndex]}</span>
+                          </div>
+                          <input type="range" min="0" max={TIMES.length - 1} step="1" value={timeIndex} onChange={(e) => setTimeIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
+                        </div>
+                      </div>
+
+                      {/* V177 ANALYSIS REPORT Removed */}
+                    </div>
+
+                    {/* V124 GENERATE BUTTON (External to Scroll Box, Bottom Locked) */}
+                    <div className="px-4 pb-2 pt-2 shrink-0">
+                      <button
+                        onClick={isGenerating ? handleCancelGenerate : handleGenerate}
+                        disabled={(!isGenerating && areSlidersLocked) || selectedItemIds.length === 0 || (!canvasItems.find(i => i.id === selectedItemIds[0])?.parameters?.analyzedOpticalParams && canvasItems.find(i => i.id === selectedItemIds[0])?.type !== 'generated')}
+                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
+                      >
+                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
+                          {isGenerating ? 'CANCEL' : 'GENERATE'}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* BOTTOM FOOTER - V177: Copyright only, No version marker */}
+                    <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
+                      <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
+                        © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
+                      </p>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+              {/* V209: SKETCH TO IMAGE Panel */}
+              <div className={`
+                absolute inset-0 transition-all duration-500 ease-in-out
+                ${!isRightPanelOpen
+                  ? 'translate-x-10 opacity-0 pointer-events-none'
+                  : (isFunctionSelectorOpen || selectedFunction !== 'SKETCH TO IMAGE')
+                    ? 'translate-y-10 opacity-0 pointer-events-none'
+                    : 'translate-0 opacity-100 pointer-events-auto'}
+              `}>
+                <aside className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10">
+                  <div className="flex flex-col h-full">
+                    <div className="flex-1 overflow-hidden px-4 pb-0 pt-4 min-h-0 flex flex-col gap-5">
+
+                      {/* CODE */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Code</span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(sketchPrompt)}
+                            className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
+                          >
+                            <Copy size={14} className="opacity-40" />
+                          </button>
+                        </div>
+                        <textarea
+                          value={sketchPrompt}
+                          onChange={e => setSketchPrompt(e.target.value)}
+                          placeholder="Describe materials, lighting..."
+                          className="w-full h-[150px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
+                        />
+                      </div>
+
+                      {/* MODE */}
+                      <div>
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">Mode</span>
+                        <div className="flex gap-3">
+                          {['CONCEPT', 'DETAIL'].map(mode => (
+                            <button
+                              key={mode}
+                              onClick={() => setSketchMode(prev => prev === mode ? '' : mode)}
+                              className={`flex-1 h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[14px] transition-all border border-black/10 dark:border-white/10
+                                ${sketchMode === mode
+                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                  : 'bg-transparent text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                            >
+                              {mode}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* STYLE GRID + DETAIL PANEL GROUP */}
+                      <div className="flex flex-col gap-3 flex-1 min-h-0">
+                        <div className="shrink-0">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">CRE-TE STYLE</span>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'NONE'].map(style => (
+                              <button
+                                key={style}
+                                onClick={() => {
+                                  const nextStyle = sketchStyle === style ? 'NONE' : style;
+                                  setSketchStyle(nextStyle);
+                                  if (nextStyle !== 'NONE') setActiveDetailStyle(nextStyle);
+                                  else setActiveDetailStyle(null);
+                                }}
+                                className={`h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[14px] border border-black/10 dark:border-white/10 transition-all
+                                  ${sketchStyle === style
+                                    ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                    : 'bg-white/80 dark:bg-black/80 text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                              >
+                                {style}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className={`flex-1 min-h-0 overflow-hidden transition-all duration-500 ease-in-out ${activeDetailStyle ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
+                          {activeDetailStyle && STYLE_DESCRIPTIONS[activeDetailStyle] ? (
+                            <div className="h-full bg-black/5 dark:bg-white/5 rounded-[20px] p-4 relative border border-black/5 dark:border-white/5 flex flex-col">
+                              <div className="shrink-0 mb-3 pr-8">
+                                <h4 className="font-bold text-[13px] leading-tight">
+                                  {STYLE_DESCRIPTIONS[activeDetailStyle].title.ko}
+                                  <br />
+                                  _{STYLE_DESCRIPTIONS[activeDetailStyle].title.en}
+                                </h4>
+                                <button onClick={() => setActiveDetailStyle(null)} className="absolute top-3 right-3 p-1.5 hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition-colors group z-20">
+                                  <X size={14} className="opacity-40 group-hover:opacity-100 transition-opacity" />
+                                </button>
+                              </div>
+                              <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
+                                <ul className="space-y-3 pb-2">
+                                  {STYLE_DESCRIPTIONS[activeDetailStyle].keywords.map((kw, idx) => (
+                                    <li key={idx} className="flex items-start">
+                                      <span className="mr-2 mt-1.5 w-1 h-1 rounded-full bg-current shrink-0 opacity-40" />
+                                      <div className="flex flex-col">
+                                        <span className="text-[11px] font-medium leading-tight">{kw.en}</span>
+                                        <span className="text-[11px] opacity-50 leading-tight">({kw.ko})</span>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          ) : <div className="h-full" />}
+                        </div>
+                      </div>
+
+                      {/* ASPECT RATIO */}
+                      <div className="shrink-0">
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">Aspect Ratio</span>
+                        <div className="flex gap-2">
+                          {['1:1', '4:3', '16:9'].map(ratio => (
+                            <button
+                              key={ratio}
+                              onClick={() => setAspectRatio(ratio)}
+                              className={`flex-1 h-[36px] rounded-full font-display tracking-widest uppercase font-medium text-[12px] transition-all border border-black/10 dark:border-white/10
+                                ${aspectRatio === ratio
+                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                  : 'bg-transparent text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                            >
+                              {ratio}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* RESOLUTION */}
+                      <div className="shrink-0">
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5">Resolution</span>
+                        <div className="flex gap-2">
+                          {['FAST', 'NORMAL', 'HIGH'].map(res => (
+                            <button
+                              key={res}
+                              onClick={() => setResolution(res + ' QUALITY')}
+                              className={`flex-1 h-[36px] rounded-full font-display tracking-widest uppercase font-medium text-[12px] transition-all border border-black/10 dark:border-white/10
+                                ${resolution.startsWith(res)
+                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                  : 'bg-transparent text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                            >
+                              {res}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="px-4 pb-2 pt-5 shrink-0">
+                      <button
+                        onClick={handleGenerate}
+                        disabled={!sketchMode || !sketchStyle || isGenerating}
+                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
+                      >
+                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
+                          {isGenerating ? <Loader2 size={20} className="animate-spin" /> : 'GENERATE'}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
+                      <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
+                        © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
+                      </p>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+              {/* V218: PLANNERS Panel */}
+              <div className={`
+                absolute inset-0 transition-all duration-500 ease-in-out
+                ${!isRightPanelOpen
+                  ? 'translate-x-10 opacity-0 pointer-events-none'
+                  : (isFunctionSelectorOpen || selectedFunction !== 'PLANNERS')
+                    ? 'translate-y-10 opacity-0 pointer-events-none'
+                    : 'translate-0 opacity-100 pointer-events-auto'}
+              `}>
+                <aside className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10">
+                  <div className="flex flex-col h-full">
+                    {/* Content area */}
+                    <div className="flex-1 overflow-hidden px-4 pb-0 pt-4 min-h-0 flex flex-col gap-5">
+
+                      {/* CODE Section */}
+                      <div className="shrink-0">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Code</span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(plannerCode)}
+                            className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
+                          >
+                            <Copy size={14} className="opacity-40" />
+                          </button>
+                        </div>
+                        <textarea
+                          value={plannerCode}
+                          onChange={e => setPlannerCode(e.target.value)}
+                          placeholder="Tell me your project, and I'll start the best expert team for you right away."
+                          className="w-full h-[150px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
+                        />
+                      </div>
+
+                      {/* EXPERTS Section */}
+                      <div className="flex-1 flex flex-col min-h-0">
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-4">Experts</span>
+
+                        {/* Scrollable grid area */}
+                        <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 custom-scrollbar pb-4">
+                          {[
+                            "전략 컨설턴트", "기업 진단가", "조직학자", "경제학자",
+                            "혁신 연구원", "경영 철학자", "트렌드 분석가", "데이터 과학자",
+                            "프로덕트 오너 (PO)", "최고운영책임자 (COO)", "최고기술책임자 (CTO)", "크리에이티브 디렉터",
+                            "수석 엔지니어", "헤지펀드 매니저"
+                          ].map((title, index) => {
+                            const num = index + 1;
+                            return (
+                              <button
+                                key={num}
+                                onClick={() => {
+                                  setPlannerAgents(prev =>
+                                    prev.includes(num) ? prev.filter(n => n !== num) : [...prev, num]
+                                  );
+                                }}
+                                className={`w-full group rounded-full border border-black/10 dark:border-white/10 p-2 transition-all flex items-center gap-3
+                                  ${plannerAgents.includes(num)
+                                    ? 'bg-black/5 dark:bg-white/5'
+                                    : 'bg-white/40 dark:bg-black/40 hover:bg-black/5 dark:hover:bg-white/5'}`}
+                              >
+                                {/* Circle Icon Area */}
+                                <div className={`w-8 h-8 rounded-full shrink-0 border border-black/5 dark:border-white/5 flex items-center justify-center
+                                  ${plannerAgents.includes(num) ? 'bg-black/10 dark:bg-white/10' : 'bg-white/60 dark:bg-black/60'}`}>
+                                  <div className="w-4 h-4 rounded-full border border-black/10 dark:border-white/10 border-dashed" />
+                                </div>
+                                <span className="font-display tracking-[0.05em] uppercase font-medium text-[12px] text-black dark:text-white truncate">
+                                  AGENT {num} ({title})
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Generate Button Row - Exactly 20px gap from the last section */}
+                    <div className="px-4 pb-2 pt-5 shrink-0">
+                      <button
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
+                      >
+                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
+                          {isGenerating ? <Loader2 size={20} className="animate-spin" /> : 'GENERATE'}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* COPYRIGHT */}
+                    <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
+                      <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
+                        © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
+                      </p>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+              {/* V217: PRINT Panel */}
+              <div className={`
+                absolute inset-0 transition-all duration-500 ease-in-out
+                ${!isRightPanelOpen
+                  ? 'translate-x-10 opacity-0 pointer-events-none'
+                  : (isFunctionSelectorOpen || selectedFunction !== 'PRINT')
+                    ? 'translate-y-10 opacity-0 pointer-events-none'
+                    : 'translate-0 opacity-100 pointer-events-auto'}
+              `}>
+                <aside className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10">
+                  <div className="flex flex-col h-full">
+                    <div className="flex-1 overflow-hidden px-4 pb-0 pt-4 min-h-0 flex flex-col gap-5">
+
+                      {/* CODE SECTION */}
+                      <div className="shrink-0">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Code</span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(printPrompt)}
+                            className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-md transition-colors"
+                          >
+                            <Copy size={14} className="opacity-40" />
+                          </button>
+                        </div>
+                        <textarea
+                          value={printPrompt}
+                          onChange={e => setPrintPrompt(e.target.value)}
+                          placeholder="Tell me your project, and I'll make the best template for you."
+                          className="w-full h-[150px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
+                        />
+                      </div>
+
+                      {/* TEMPLATE SECTION */}
+                      <div className="flex flex-col gap-1.5 text-center">
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-1.5 text-left">Template</span>
+                        <div className="flex flex-col gap-2">
+                          {[
+                            'REPORT',
+                            'DRAWING & SPECIFICATION',
+                            'PANEL',
+                            'VIDEO'
+                          ].map(template => (
+                            <button
+                              key={template}
+                              onClick={() => setPrintTemplate(prev => prev === template ? '' : template)}
+                              className={`w-full h-[44px] rounded-full font-display tracking-widest uppercase font-medium text-[14px] border border-black/10 dark:border-white/10 transition-all flex items-center justify-center
+                                ${printTemplate === template
+                                  ? 'bg-black/5 dark:bg-white/5 text-black dark:text-white'
+                                  : 'bg-white/40 dark:bg-black/40 text-black dark:text-white hover:bg-black/5 dark:hover:bg-white/5'}`}
+                            >
+                              {template}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* NUMBER OF PAGES SECTION */}
+                      <div>
+                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-4">Number of Pages</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setPrintPages(prev => Math.max(1, prev - 1))}
+                            className="w-[44px] h-[44px] rounded-[12px] border border-black/10 dark:border-white/10 flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                          >
+                            <span className="text-xl font-light">-</span>
+                          </button>
+                          <div className="flex-1 h-[44px] rounded-[12px] border border-black/10 dark:border-white/10 flex items-center justify-center font-mono text-sm bg-white/30 dark:bg-black/30">
+                            {printPages}
+                          </div>
+                          <button
+                            onClick={() => setPrintPages(prev => Math.min(10, prev + 1))}
+                            className="w-[44px] h-[44px] rounded-[12px] border border-black/10 dark:border-white/10 flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                          >
+                            <span className="text-xl font-light">+</span>
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    <div className="px-4 pb-2 pt-5 shrink-0">
+                      <button
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
+                      >
+                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
+                          {isGenerating ? <Loader2 size={20} className="animate-spin" /> : 'GENERATE'}
+                        </span>
+                      </button>
+                    </div>
+
+                    <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
+                      <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
+                        © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
+                      </p>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+
+            </div>{/* End Shared Panel Container */}
+          </div>{/* End inner flex col */}
+        </div>{/* End SIDEBAR WRAPPER outer */}
+      </main>
+    </div>
+  );
+}

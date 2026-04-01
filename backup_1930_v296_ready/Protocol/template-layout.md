@@ -4,33 +4,38 @@
 <meta charset="UTF-8">
 <title>Image to Elevation - 5 Viewpoints (Cross Layout)</title>
 
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+
 <style>
   :root {
-    --bg-color: #FFFFFF;     /* V298: Pure White */
-    --text-primary: #000000; /* V298 */
-    --accent-color: #000000; /* V298 */
+    --bg-color: #121212;
+    --text-primary: #FFFFFF;
+    --accent-color: #F4C430; /* LAYOUT.jpg의 메인 옐로우 컬러 참조 */
   }
 
-  * {
+  * { 
     box-sizing: border-box;
     cursor: default;
   }
 
   body, html {
-    margin: 0;
-    padding: 0;
-    width: 100vw;
+    margin: 0; 
+    padding: 0; 
+    width: 100vw; 
     height: 100vh;
     background-color: var(--bg-color);
     overflow: hidden;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; /* V298 */
+    font-family: 'Pretendard', sans-serif;
   }
 
   .layout-container {
     display: flex;
-    width: 100%;
+    width: 100%; 
     height: 100%;
-    padding: 40px;
+    padding: 60px 40px 40px 40px;
     justify-content: center;
     align-items: center;
   }
@@ -44,9 +49,16 @@
     flex-direction: column;
   }
 
-  /* V298: 타이틀 삭제 */
   .title-overlay {
-    display: none;
+    position: absolute;
+    top: -45px; 
+    left: 0px;
+    font-family: 'Bebas Neue', cursive;
+    font-size: 36px;
+    color: var(--text-primary);
+    z-index: 10;
+    margin: 0;
+    letter-spacing: 2px;
   }
 
   /* Single Image Wrapper */
@@ -64,7 +76,7 @@
   .master-composite-img {
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: contain; /* 건축물 비례에 맞추어 유연하게 스케일링 */
     position: absolute;
     top: 0;
     left: 0;
@@ -74,11 +86,12 @@
   /* CSS Grid를 활용한 십자(Cross) 레이아웃 오버레이 */
   .visual-grid-overlay {
     position: absolute;
-    top: 0;
+    top: 0; 
     left: 0;
-    width: 100%;
+    width: 100%; 
     height: 100%;
     display: grid;
+    /* 3x3 그리드 구성 (십자 형태) */
     grid-template-columns: 1fr 1fr 1fr;
     grid-template-rows: 1fr 1fr 1fr;
     grid-template-areas:
@@ -95,8 +108,9 @@
     flex-direction: column;
     justify-content: flex-end;
     align-items: center;
-    pointer-events: none;
+    pointer-events: none; 
     user-select: none;
+    border: 1px solid rgba(255, 255, 255, 0.1); /* 영역 확인용 미세 가이드라인 */
   }
 
   /* 레이아웃 에어리어 할당 */
@@ -111,18 +125,15 @@
     visibility: hidden;
   }
 
-  /* V298: 라벨 스타일 */
   .label-item strong {
-    font-size: 12px;            /* V298: 16px → 12px */
+    font-size: 16px;
     font-weight: 500;
-    color: #FFFFFF;             /* V298: 텍스트 흰색 */
-    background-color: #000000; /* V298: 배경 검정 */
-    width: auto;                /* V298: 100% → auto (인라인 박스) */
-    display: inline-block;
+    color: var(--bg-color);
+    background-color: var(--accent-color);
+    width: 100%;
     text-align: center;
-    padding: 3px;               /* V298: 10px 0 → 3px */
+    padding: 10px 0;
     margin: 0;
-    margin-bottom: 12px;        /* V298: 셀 하단에서 12px */
     text-transform: uppercase;
     letter-spacing: 1px;
     opacity: 0.9;
@@ -134,19 +145,19 @@
   <div class="layout-container">
     <div class="main-panel">
       <h1 class="title-overlay">IMAGE TO ELEVATION: 5-VIEW ORTHOGRAPHIC</h1>
-
+      
       <div class="composite-wrapper">
         <img src="{{img_url_5view_cross_composite}}" class="master-composite-img" alt="5-View Architectural Sheet">
-
+        
         <div class="visual-grid-overlay">
           <div class="label-item empty"></div>
           <div class="label-item rear"><strong>REAR</strong></div>
           <div class="label-item empty"></div>
-
+          
           <div class="label-item left"><strong>LEFT</strong></div>
           <div class="label-item top"><strong>TOP</strong></div>
           <div class="label-item right"><strong>RIGHT</strong></div>
-
+          
           <div class="label-item empty"></div>
           <div class="label-item front"><strong>FRONT</strong></div>
           <div class="label-item empty"></div>
