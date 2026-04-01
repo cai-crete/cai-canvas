@@ -1475,6 +1475,7 @@ export default function App() {
 
   // V297 D-6: Phase 0 묘사 공통 함수
   const getArchitecturalDescription = async (src: string): Promise<string> => {
+    const signal = abortControllerRef.current?.signal;
     try {
       const b64 = src.split(',')[1];
       const mime = src.split(';')[0].split(':')[1];
@@ -1488,6 +1489,7 @@ export default function App() {
           ]
         }
       });
+      if (signal?.aborted) return '';
       return descResult.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } catch { return ''; }
   };
@@ -1499,6 +1501,11 @@ export default function App() {
 
     setIsAnalyzing(true);
     setAnalysisStep('이미지 묘사 분석 중...');
+    
+    // V319: AbortController 초기화
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const signal = controller.signal;
 
     // V297 D-3: Phase 0 — 이미지 재생성 → 텍스트 묘사 호출 (원본 이미지 불변)
     let buildingDescription = '';
@@ -1515,7 +1522,7 @@ export default function App() {
           ]
         }
       });
-      if (abortControllerRef.current?.signal.aborted) return;
+      if (signal.aborted) return;
       buildingDescription = descResult.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } catch (descErr) {
       console.warn('[V297 D] Phase 0 묘사 호출 실패, 묘사 없이 진행', descErr);
@@ -1530,12 +1537,14 @@ export default function App() {
       i.id === sourceItem.id ? { ...i, label: 'IMAGE / VIEW' } : i
     ));
     // V297 D-4: 원본 이미지 + 묘사 텍스트 전달
+    if (signal.aborted) return;
     await analyzeViewpoint(sourceItem.src, sourceItem.id, buildingDescription);
   };
 
   const analyzeViewpoint = async (base64Image: string, itemId?: string, buildingDescription: string = '') => { // V297 D-1
     setIsAnalyzing(true);
     setAnalysisStep('이미지 분석 중...'); // V155: Step — Analysis
+    const signal = abortControllerRef.current?.signal;
     try {
       // Phase 1 & 2: Structural & Viewpoint Analysis using gemini-3.1-pro-preview
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -1686,6 +1695,7 @@ export default function App() {
 
 
   const generateElevations = async (base64Image: string, extractedParams?: any, itemId?: string, buildingDescription: string = '') => { // V300 A: base64Image 복원
+    const signal = abortControllerRef.current?.signal;
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const contextualParamsStr = extractedParams ? JSON.stringify(extractedParams) : "BIM Lock-on Active";
@@ -1776,6 +1786,7 @@ CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
           },
           config: { temperature: 0.1, topK: 1 } // Protocol standard
         });
+        if (signal?.aborted) return null;
         return extractImage(result);
       };
 
@@ -1827,6 +1838,7 @@ CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
           }
         });
 
+      if (signal?.aborted) return null;
       const sheetImage = await buildCrossComposite(newImages);
 
       if (itemId) {
@@ -2063,7 +2075,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
             }
             parts.push({ text: finalPrompt });
             const response = await ai.models.generateContent({ model: modelName, contents: { parts }, config: { temperature: 0.1, topK: 1 } }); // V297 G-5
-            if (!abortControllerRef.current || abortControllerRef.current.signal.aborted) return false;
+            if (abortControllerRef.current?.signal.aborted) return false;
 
             if (response.candidates?.[0]?.content?.parts) {
               for (const part of response.candidates[0].content.parts) {
@@ -2132,6 +2144,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
         });
         await Promise.all(generatePromises);
       } catch (error) {
+        if (abortControllerRef.current?.signal.aborted) return;
         console.error("Generation Error:", error);
         alert("An error occurred during generation.");
       } finally {
@@ -2364,6 +2377,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
         if (!success) await runGen(IMAGE_GEN_FALLBACK);
 
       } catch (err) {
+        if (abortControllerRef.current?.signal.aborted) return;
         console.error("Sketch to Image error", err);
         alert("Sketch generation failed.");
       } finally {
