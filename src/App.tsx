@@ -908,6 +908,81 @@ export default function App() {
     };
   };
 
+  const exportArtboardToImage = async (artboardItem: CanvasItem) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = artboardItem.width;
+      canvas.height = artboardItem.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Fill background (white for artboards)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw background image if src exists
+      if (artboardItem.src) {
+        await new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous'; // Important for CORS
+          img.onload = () => {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve();
+          };
+          img.onerror = () => {
+            console.error('Failed to load artboard image for export');
+            resolve(); // Proceed anyway
+          };
+          img.src = artboardItem.src as string;
+        });
+      }
+
+      // Find children paths and draw them
+      const childPaths = canvasItems.filter(i => i.type === 'path' && i.motherId === artboardItem.id);
+      childPaths.forEach(pathItem => {
+        if (pathItem.parameters?.points && pathItem.parameters.points.length > 0) {
+          ctx.beginPath();
+          // Relative offset in case the path item moved independently from the mother item
+          const offsetX = pathItem.x - artboardItem.x;
+          const offsetY = pathItem.y - artboardItem.y;
+
+          pathItem.parameters.points.forEach((p: {x: number, y: number}, idx: number) => {
+            const drawX = p.x + offsetX;
+            const drawY = p.y + offsetY;
+            if (idx === 0) {
+              ctx.moveTo(drawX, drawY);
+            } else {
+              ctx.lineTo(drawX, drawY);
+            }
+          });
+          ctx.strokeStyle = pathItem.parameters?.strokeColor || (theme === 'dark' ? '#FFFFFF' : '#000000');
+          // Important: SVG paths rendered in dark mode are white, but we export black or original color on white background.
+          // Override to black if our artboard is white and it was drawn in dark mode, or just use the exact hex.
+          let color = pathItem.parameters?.strokeColor || '#000000';
+          if (color === '#FFF' || color === '#FFFFFF') {
+             // If white was used because of dark mode, write it as black for export
+             color = '#000000'; 
+          }
+          ctx.strokeStyle = color;
+          ctx.lineWidth = pathItem.parameters?.strokeWidth || 2;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+        }
+      });
+
+      // Export
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = artboardItem.label ? `${artboardItem.label.toLowerCase().replace(/\s+/g, '_')}.png` : 'artboard.png';
+      link.href = dataUrl;
+      link.click();
+    } catch (e) {
+      console.error('Export failed', e);
+    }
+  };
+
+
   const handlePointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement;
     const isUIInteraction = target.closest('.pointer-events-auto');
@@ -3569,15 +3644,14 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             )}
 
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
-                            <a
-                              href={item.src || '#'}
-                              download={item.label ? `${item.label.toLowerCase().replace(/\s+/g, '_')}.png` : 'artboard.png'}
-                              className={`flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full ${!item.src ? 'opacity-30 pointer-events-none' : ''}`}
+                            <button
+                              onClick={() => exportArtboardToImage(item)}
+                              className={`flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full`}
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
                               title="다운로드"
                             >
                               <Download size={14 / (canvasZoom / 100)} />
-                            </a>
+                            </button>
 
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
