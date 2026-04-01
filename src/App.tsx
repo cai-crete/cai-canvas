@@ -911,9 +911,13 @@ export default function App() {
   const handlePointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement;
     const isUIInteraction = target.closest('.pointer-events-auto');
+    const isCanvasItem = target.closest('[data-canvas-item="true"]');
     // V187: Allow resize handles to bypass UI block
     const isResizeHandle = target.classList.contains('resize-handle') || target.style.cursor?.endsWith('-resize');
-    if (isUIInteraction && !isResizeHandle) return;
+    
+    // V310: In drawing/text modes, allow clicking on items even if they are 'pointer-events-auto'
+    const isDrawingMode = ['pen', 'eraser', 'text'].includes(canvasMode);
+    if (isUIInteraction && !isResizeHandle && !(isDrawingMode && isCanvasItem)) return;
 
     // V184: Auto-collapse expanded search ONLY when NOT clicking UI elements (Canvas or Item clicks)
     setShowStrokePanel(null); // V255: Close stroke width panel on canvas click
@@ -1015,9 +1019,8 @@ export default function App() {
         }
 
         // V264: locked artboard — selection allowed, drag blocked
-        // V309: derived 'upload' items (with motherId) are also blocked from dragging
-        const isDerivedUpload = clickedItem.type === 'upload' && clickedItem.motherId !== null;
-        if (!(clickedItem.type === 'artboard' && clickedItem.isLocked) && !isDerivedUpload) {
+        // V313: All items movable in select mode (removed V309 derived block)
+        if (!(clickedItem.type === 'artboard' && clickedItem.isLocked)) {
           isDraggingItemRef.current = true;
           setIsDraggingItem(true);
           dragStartRef.current = { x: coords.x, y: coords.y };
@@ -1079,9 +1082,9 @@ export default function App() {
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
-      // V257 C-10: Block drawing outside drawable item bounds
+      // V314: Smart Target - Enable sketching on artboard (even if blank) or any item with src/motherId
       const drawTarget = canvasItems.find((item: CanvasItem) =>
-        (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
+        (item.src || item.motherId || item.type === 'artboard') &&
         coords.x >= item.x && coords.x <= item.x + item.width &&
         coords.y >= item.y && coords.y <= item.y + item.height
       );
@@ -1109,10 +1112,9 @@ export default function App() {
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
-      // V254: drag-based partial erase for paths (Q1: only paths, images/text ignored)
-      // V257 C-10: Block erasing outside drawable item bounds
+      // V314: Smart Target - Enable erasing on artboard (even if blank) or any item with src/motherId
       const eraseTarget = canvasItems.find((item: CanvasItem) =>
-        (item.type === 'upload' || item.type === 'generated' || item.type === 'artboard') &&
+        (item.src || item.motherId || item.type === 'artboard') &&
         coords.x >= item.x && coords.x <= item.x + item.width &&
         coords.y >= item.y && coords.y <= item.y + item.height
       );
@@ -2569,12 +2571,16 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             const mother = cardItems.find((c: CanvasItem) => c.id === child.motherId);
                             if (!mother) return null;
                             
-                            // V291 A&B: 절대 가로/세로 결정 조건 확장
+                            // V313: 연결 방향 최적화 (sketch_generated=가로, ELEVATION SHEET=세로)
+                            const isElevationSheet = child.label === 'ANALYZED' || child.label === 'ELEVATION SHEET';
+                            const isSketchGenerated = child.type === 'sketch_generated';
                             const isFirstArtboard = !mother.motherId && mother.type === 'artboard';
                             const isEditDerived = child.type === 'artboard';
                             const isViewpoint = child.type === 'generated';
+                            // V315: '+' 버튼으로 승격된 upload 아이템(motherId 보유)은 가로 연결 유지
+                            const isPromotedUpload = child.type === 'upload' && child.motherId !== null;
                             
-                            const isHorizontalConnection = isFirstArtboard || isEditDerived || isViewpoint;
+                            const isHorizontalConnection = (isFirstArtboard || isEditDerived || isViewpoint || isSketchGenerated || isPromotedUpload) && !isElevationSheet;
 
                             const startX = isHorizontalConnection ? mother.x + mother.width : mother.x + mother.width / 2;
                             const startY = isHorizontalConnection ? mother.y + mother.height / 2 : mother.y + mother.height;
@@ -3125,14 +3131,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                 return (
                 <div
                   key={item.id}
-                  draggable={item.type === 'upload'} // V280: CHANGE VIEWPOINT(generated) 드래그 제거
-                  onDragStart={(e: React.DragEvent) => {
-                    if (item.type === 'upload' && item.src) {
-                      e.stopPropagation();  // V269: prevent canvas container preventDefault from cancelling drag
-                      e.dataTransfer.setData('text/image-src', item.src);
-                      e.dataTransfer.effectAllowed = 'copy';
-                    }
-                  }}
+                  data-canvas-item="true"
+                  draggable={false} // V313: Disable native drag to prevent interference with sketching
                   style={{
                     position: 'absolute',
                     left: item.x,
@@ -3682,22 +3682,26 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                         ) : (
                           /* V272: upload — [edit(+)|download|library*|delete] */
                           <>
-                            <button
-                              onClick={() => {
-                                // V276: editVersions 초기화 (패널 미오픈)
-                                setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
-                                  i.id === item.id
-                                    ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: i.label || 'ORIGINAL' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
-                                    : i
-                                ));
-                              }}
-                              className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
-                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="편집 탭 추가"
-                            >
-                              <Plus size={12 / (canvasZoom / 100)} />
-                            </button>
-                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                            {!item.motherId && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    // V276: editVersions 초기화 (패널 미오픈)
+                                    setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) =>
+                                      i.id === item.id
+                                        ? { ...i, editVersions: i.editVersions || [{ src: i.src!, label: i.label || 'ORIGINAL' }], activeVersionIndex: i.editVersions ? i.activeVersionIndex : 0 }
+                                        : i
+                                    ));
+                                  }}
+                                  className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                                  title="편집 탭 추가"
+                                >
+                                  <Plus size={12 / (canvasZoom / 100)} />
+                                </button>
+                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                              </>
+                            )}
                             <a
                               href={item.src || '#'}
                               download="image.png"
@@ -3921,22 +3925,33 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
             </div>
 
             <div className={`
-              w-[228px] mr-[56px] flex flex-col gap-[6px] pb-[3px] transition-all duration-300 overflow-hidden shrink-0
+              w-[228px] mr-[56px] flex flex-col gap-[6px] pb-[3px] transition-all duration-300 overflow-y-auto custom-scrollbar shrink-0
               ${isRightPanelOpen && isFunctionSelectorOpen
-                ? 'max-h-[500px] opacity-100 mb-[12px] translate-y-0'
+                ? 'max-h-[700px] opacity-100 mb-[12px] translate-y-0'
                 : 'max-h-0 opacity-0 mb-0 -translate-y-4 pointer-events-none'}
             `}>
-              {['PLANNERS', 'SKETCH TO IMAGE', 'IMAGE TO ELEVATION', 'CHANGE VIEWPOINT', 'PRINT'].map(fn => {
+              {/* V316: 11-button expanded sequence */}
+              {[
+                'WRITER', 'PLANNERS', 'PARAMETER', 
+                'SKETCH TO PLAN', 'PLAN TO VOLUME', 'PLAN TO DIAGRAM', 
+                'SKETCH TO IMAGE', 'IMAGE TO ELEVATION', 'STYLE EDIT', 
+                'CHANGE VIEWPOINT', 'PRINT'
+              ].map(fn => {
                 const sourceItem = selectedItemIds.length > 0 ? canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]) : null;
                 // V309: ELEVATION SHEET 락업
                 const isElevationSheetSelected = sourceItem?.label === 'ELEVATION SHEET' || sourceItem?.label === 'ANALYZED';
                 const isLockedButton = isElevationSheetSelected && (fn === 'IMAGE TO ELEVATION' || fn === 'CHANGE VIEWPOINT');
+                
+                // V316: 신규 버튼은 비활성 시각적 플레이스홀더 (Add Tools와 동일)
+                const isPlaceholder = ['WRITER', 'PARAMETER', 'SKETCH TO PLAN', 'PLAN TO VOLUME', 'PLAN TO DIAGRAM', 'STYLE EDIT'].includes(fn);
 
                 return (
                   <button
                     key={fn}
                     disabled={isLockedButton}
                     onClick={() => {
+                      if (isPlaceholder) return; // V316: Placeholder buttons do nothing
+                      
                       // V285 B: SKETCH TO IMAGE — 미선택 가드
                       if (fn === 'SKETCH TO IMAGE') {
                         if (selectedItemIds.length === 0) {
@@ -3996,7 +4011,12 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                       setSelectedFunction(fn);
                       setIsFunctionSelectorOpen(false);
                     }}
-                    className={`h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm transition-all pointer-events-auto ${isLockedButton ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                    style={{ 
+                      // V317: PARAMETER/CHANGE VIEWPOINT 뒤에 6px 추가 여백 (기본 gap-6px와 합산하여 12px 구현)
+                      marginBottom: (fn === 'PARAMETER' || fn === 'CHANGE VIEWPOINT') ? '6px' : '0px' 
+                    }}
+                    className={`h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm transition-all pointer-events-auto 
+                      ${isPlaceholder ? 'cursor-default' : (isLockedButton ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5')}`}
                   >
                     <span className="font-display tracking-widest uppercase font-medium text-[15px]">{fn}</span>
                   </button>
