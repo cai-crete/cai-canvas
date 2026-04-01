@@ -3552,6 +3552,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                                 : <svg width={12/(canvasZoom/100)} height={12/(canvasZoom/100)} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
                               }
                             </button>
+
                             {/* V282 D-2: artboard ANALYZED 모체 Book 버튼 */}
                             {item.label === 'ANALYZED' && (
                               <>
@@ -3566,6 +3567,18 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                                 </button>
                               </>
                             )}
+
+                            <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                            <a
+                              href={item.src || '#'}
+                              download={item.label ? `${item.label.toLowerCase().replace(/\s+/g, '_')}.png` : 'artboard.png'}
+                              className={`flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full ${!item.src ? 'opacity-30 pointer-events-none' : ''}`}
+                              style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                              title="다운로드"
+                            >
+                              <Download size={14 / (canvasZoom / 100)} />
+                            </a>
+
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
@@ -3580,6 +3593,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             >
                               <Trash2 size={12 / (canvasZoom / 100)} />
                             </button>
+
                           </>
                         ) : item.type === 'sketch_generated' ? (
                           /* V308: sketch_generated — [edit(+)|download|delete] */
@@ -4029,8 +4043,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                       // V317: PARAMETER/CHANGE VIEWPOINT 뒤에 6px 추가 여백 (기본 gap-6px와 합산하여 12px 구현)
                       marginBottom: (fn === 'PARAMETER' || fn === 'CHANGE VIEWPOINT') ? '6px' : '0px' 
                     }}
-                    className={`h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm transition-all pointer-events-auto 
-                      ${isPlaceholder ? 'cursor-default' : (isLockedButton ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5')}`}
+                    className={`h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm transition-all pointer-events-auto hover:bg-black/5 dark:hover:bg-white/5 
+                      ${isLockedButton ? 'opacity-30 cursor-not-allowed' : (isPlaceholder ? 'cursor-default' : '')}`}
                   >
                     <span className="font-display tracking-widest uppercase font-medium text-[15px]">{fn}</span>
                   </button>
