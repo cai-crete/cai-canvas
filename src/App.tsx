@@ -1112,9 +1112,9 @@ export default function App() {
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
       }
-      // V314: Smart Target - Enable erasing on artboard (even if blank) or any item with src/motherId
+      // V318: Smart Target - Enable erasing on artboard (even if blank), any item with src/motherId, OR any existing path (for background cleanup)
       const eraseTarget = canvasItems.find((item: CanvasItem) =>
-        (item.src || item.motherId || item.type === 'artboard') &&
+        (item.src || item.motherId || item.type === 'artboard' || item.type === 'path') &&
         coords.x >= item.x && coords.x <= item.x + item.width &&
         coords.y >= item.y && coords.y <= item.y + item.height
       );
