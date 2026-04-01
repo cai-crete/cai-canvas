@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Footprints, Plus, PanelLeft, Lasso, X, Copy, Pencil, Eraser, Type, Bot, Orbit, GitBranch, Shield, Zap, Wind, Hash, History, Target, Cpu, PenTool, Box, Scale } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
+import { saveImageToDB, loadImageFromDB, deleteImageFromDB } from './lib/imageDB';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 import { EXPERTS as PLANNER_EXPERTS } from './lib/plannerExperts';
 import { generateDiscussion, type DiscussionResult } from './lib/plannerGenerate';
@@ -343,14 +344,51 @@ export default function App() {
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>(() => {
     try {
       const saved = localStorage.getItem('crete_canvasItems');
+      // src is intentionally stripped before saving — restored async from IndexedDB below
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
+  // [V308] On mount: restore src from IndexedDB for all items
   useEffect(() => {
-    localStorage.setItem('crete_canvasItems', JSON.stringify(canvasItems));
+    const restoreSrcs = async () => {
+      const restored = await Promise.all(
+        (JSON.parse(localStorage.getItem('crete_canvasItems') || '[]') as CanvasItem[]).map(async (item) => {
+          if (!item.src) {
+            const src = await loadImageFromDB(item.id);
+            return { ...item, src: src || null };
+          }
+          return item;
+        })
+      );
+      setCanvasItems(restored);
+    };
+    restoreSrcs();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // [V308] Persist: save src to IndexedDB separately, strip from localStorage to avoid QuotaExceededError
+  useEffect(() => {
+    const persist = async () => {
+      // Save all srcs to IndexedDB
+      await Promise.all(
+        canvasItems.map(async (item) => {
+          if (item.src) {
+            await saveImageToDB(item.id, item.src);
+          }
+        })
+      );
+      // Save stripped state (no base64) to localStorage
+      const stripped = canvasItems.map((item) => ({ ...item, src: null }));
+      try {
+        localStorage.setItem('crete_canvasItems', JSON.stringify(stripped));
+      } catch (err) {
+        console.error('[V308] localStorage.setItem failed (stripped):', err);
+      }
+    };
+    persist();
   }, [canvasItems]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const selectedItemIdsRef = useRef<string[]>([]);
@@ -977,7 +1015,9 @@ export default function App() {
         }
 
         // V264: locked artboard — selection allowed, drag blocked
-        if (!(clickedItem.type === 'artboard' && clickedItem.isLocked)) {
+        // V309: derived 'upload' items (with motherId) are also blocked from dragging
+        const isDerivedUpload = clickedItem.type === 'upload' && clickedItem.motherId !== null;
+        if (!(clickedItem.type === 'artboard' && clickedItem.isLocked) && !isDerivedUpload) {
           isDraggingItemRef.current = true;
           setIsDraggingItem(true);
           dragStartRef.current = { x: coords.x, y: coords.y };
@@ -2032,8 +2072,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                     img.onload = () => {
                       const updatedOpticalParams = { angle: ANGLES[angleIndex], altitude: ALTITUDES[altitudeIndex].label, lens: LENSES[lensIndex].label, time: TIMES[timeIndex] };
                       // V272 F-2: VIEWPOINT label 자동 증가
-                      // V284 E: VIEW XX 넘버링
-                      const vpCount = canvasItems.filter((ci: CanvasItem) => ci.label?.startsWith('VIEW ')).length + 1;
+                      // V309: VIEW XX 넘버링 (모체 독립적)
+                      const vpCount = canvasItems.filter((ci: CanvasItem) => ci.motherId === sourceItem.id && ci.label?.startsWith('VIEW ')).length + 1;
                       const newGenItem: CanvasItem = {
                         id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                         type: 'generated',
@@ -3257,7 +3297,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             gridTemplateAreas: '". rear ." "left top right" ". front ."',
                           }}
                         >
-                          {[
+                          {canvasZoom > 40 && [
                             { area: 'rear',  label: 'REAR'  },
                             { area: 'left',  label: 'LEFT'  },
                             { area: 'top',   label: 'TOP'   },
@@ -3528,30 +3568,33 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             </button>
                           </>
                         ) : item.type === 'sketch_generated' ? (
-                          /* V272: sketch_generated — [edit(+)|download|delete] */
+                          /* V308: sketch_generated — [edit(+)|download|delete] */
                           <>
                             <button
                               onClick={() => {
-                                // V306: 독립 모체화 (제자리 교체)
+                                // V308: 연결선을 유지하면서 스케치 가능 상태로 전환
+                                // motherId 유지 → 모체와의 Bezier 연결선 보존
+                                // editVersions 미생성 → < > 화살표 방지
                                 setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
                                 setRedoStates([]);
                                 setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) => {
                                   if (i.id === item.id) {
                                     return {
                                       ...i,
-                                      type: 'upload', // 새로운 독립 모체로 승격
-                                      motherId: null,
-                                      editVersions: [{ src: i.src!, label: i.label || 'ORIGINAL' }],
-                                      activeVersionIndex: 0,
-                                      parameters: null // 기존 분석값 초기화하여 재분석 유도
+                                      type: 'upload', // 스케치/편집 가능 상태로 승격
+                                      motherId: i.motherId, // [V308] 모체 연결선 유지
+                                      // editVersions 미생성 → < > 라벨 방지
+                                      parameters: null
                                     };
                                   }
                                   return i;
                                 }));
+                                // V309: 스케치 즉각 활성화
+                                setCanvasMode('pen');
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="편집 탭 추가"
+                              title="스케치 편집 모드로 전환"
                             >
                               <Plus size={12 / (canvasZoom / 100)} />
                             </button>
@@ -3581,30 +3624,33 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             </button>
                           </>
                         ) : item.type === 'generated' ? (
-                          /* V272: generated — [edit(+)|download|delete] + Change E: 연결 해제 + 모체화 */
+                          /* V308: generated — [edit(+)|download|delete] */
                           <>
                             <button
                               onClick={() => {
-                                // V304: 모체 이미지를 우측에 추가하지 않고, 모체 위치에서 현재 파생 이미지로 대체
+                                // V308: 제자리에서 스케치 가능 상태로 전환
+                                // motherId 유지 → 모체와의 Bezier 연결선 보존
+                                // editVersions 미생성 → < > 화살표 방지
                                 setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
                                 setRedoStates([]);
                                 setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) => {
-                                  if (i.id === item.motherId) {
-                                    // 모체 발견 시 현재 파생 이미지의 src와 파라미터로 완전 대체
+                                  if (i.id === item.id) {
                                     return {
                                       ...i,
-                                      src: item.src,
-                                      label: i.label, // 모체의 label/역할은 유지
-                                      parameters: { ...(i.parameters || {}), ...(item.parameters || {}) },
+                                      type: 'upload', // 스케치/편집 가능 상태로 승격
+                                      motherId: i.motherId, // [V308] 모체 연결선 유지
+                                      // editVersions 미생성 → < > 라벨 방지
+                                      parameters: null
                                     };
                                   }
                                   return i;
-                                }).filter((i: CanvasItem) => i.id !== item.id)); // 파생 이미지 자신은 제거
-                                setSelectedItemIds([]);
+                                }));
+                                // V309: 스케치 즉각 활성화
+                                setCanvasMode('pen');
                               }}
                               className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
                               style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
-                              title="독립 모체 생성"
+                              title="스케치 편집 모드로 전환"
                             >
                               <Plus size={12 / (canvasZoom / 100)} />
                             </button>
@@ -3880,67 +3926,82 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                 ? 'max-h-[500px] opacity-100 mb-[12px] translate-y-0'
                 : 'max-h-0 opacity-0 mb-0 -translate-y-4 pointer-events-none'}
             `}>
-              {['PLANNERS', 'SKETCH TO IMAGE', 'IMAGE TO ELEVATION', 'CHANGE VIEWPOINT', 'PRINT'].map(fn => (
-                <button
-                  key={fn}
-                  onClick={() => {
-                    // V285 B: SKETCH TO IMAGE — 미선택 가드
-                    if (fn === 'SKETCH TO IMAGE') {
-                      if (selectedItemIds.length === 0) {
-                        setToastMessage('스케치를 먼저 선택해주세요.');
-                        setTimeout(() => setToastMessage(''), 3000);
+              {['PLANNERS', 'SKETCH TO IMAGE', 'IMAGE TO ELEVATION', 'CHANGE VIEWPOINT', 'PRINT'].map(fn => {
+                const sourceItem = selectedItemIds.length > 0 ? canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]) : null;
+                // V309: ELEVATION SHEET 락업
+                const isElevationSheetSelected = sourceItem?.label === 'ELEVATION SHEET' || sourceItem?.label === 'ANALYZED';
+                const isLockedButton = isElevationSheetSelected && (fn === 'IMAGE TO ELEVATION' || fn === 'CHANGE VIEWPOINT');
+
+                return (
+                  <button
+                    key={fn}
+                    disabled={isLockedButton}
+                    onClick={() => {
+                      // V285 B: SKETCH TO IMAGE — 미선택 가드
+                      if (fn === 'SKETCH TO IMAGE') {
+                        if (selectedItemIds.length === 0) {
+                          setToastMessage('스케치를 먼저 선택해주세요.');
+                          setTimeout(() => setToastMessage(''), 3000);
+                          return;
+                        }
+                      }
+                      if (fn === 'CHANGE VIEWPOINT') {
+                        if (!sourceItem?.src) {
+                          setToastMessage('이미지를 먼저 선택해주세요.');
+                          setTimeout(() => setToastMessage(''), 3000);
+                          return;
+                        }
+                        // V304: PHASE 3 전담 — 기존 분석 파라미터 복원만 수행 (handleAnalyze 제거)
+                        if (sourceItem.parameters?.analyzedOpticalParams) {
+                          setSelectedFunction(fn);
+                          setIsFunctionSelectorOpen(false);
+                          setIsRightPanelOpen(true);
+                          setAnalyzedOpticalParams(sourceItem.parameters.analyzedOpticalParams);
+                          setElevationParams(sourceItem.parameters.elevationParams || null);
+                          setSitePlanImage(sourceItem.parameters.sitePlanImage || null);
+                          setElevationImages(sourceItem.parameters.elevationImages || null);
+                          setCvPrompt(sourceItem.parameters.cvPrompt || '');
+                          // V304: V0를 UI 슬라이더에 표시
+                          if (sourceItem.parameters.angleIndex !== undefined) setAngleIndex(sourceItem.parameters.angleIndex);
+                          if (sourceItem.parameters.altitudeIndex !== undefined) setAltitudeIndex(sourceItem.parameters.altitudeIndex);
+                          if (sourceItem.parameters.lensIndex !== undefined) setLensIndex(sourceItem.parameters.lensIndex);
+                          if (sourceItem.parameters.timeIndex !== undefined) setTimeIndex(sourceItem.parameters.timeIndex);
+                        } else {
+                          // V305: 파라미터 없을 때 패널 열림 차단 (return 처리)
+                          setToastMessage('먼저 IMAGE TO ELEVATION을 실행해 분석하세요.');
+                          setTimeout(() => setToastMessage(''), 3500);
+                        }
                         return;
                       }
-                    }
-                    if (fn === 'CHANGE VIEWPOINT') {
-                      const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                      if (!sourceItem?.src) {
-                        setToastMessage('이미지를 먼저 선택해주세요.');
-                        setTimeout(() => setToastMessage(''), 3000);
+                      // V304 A: IMAGE TO ELEVATION — 미선택 가드 및 즉시 실행
+                      if (fn === 'IMAGE TO ELEVATION') {
+                        if (!sourceItem?.src) {
+                          setToastMessage('이미지를 먼저 선택해주세요.');
+                          setTimeout(() => setToastMessage(''), 3000);
+                          return;
+                        }
+                        
+                        // V309: 중복 실행 검사 및 토스트
+                        const existingElevation = canvasItems.some(i => i.type === 'artboard' && i.motherId === sourceItem.id && i.label === 'ANALYZED');
+                        if (existingElevation) {
+                          setToastMessage('이미 전개도 생성이 완료된 이미지입니다.');
+                          setTimeout(() => setToastMessage(''), 3000);
+                          return;
+                        }
+                        
+                        // V306: 패널 변경 없이 백그라운드 5면도 실행
+                        handleAnalyze();
                         return;
                       }
-                      // V304: PHASE 3 전담 — 기존 분석 파라미터 복원만 수행 (handleAnalyze 제거)
-                      if (sourceItem.parameters?.analyzedOpticalParams) {
-                        setSelectedFunction(fn);
-                        setIsFunctionSelectorOpen(false);
-                        setIsRightPanelOpen(true);
-                        setAnalyzedOpticalParams(sourceItem.parameters.analyzedOpticalParams);
-                        setElevationParams(sourceItem.parameters.elevationParams || null);
-                        setSitePlanImage(sourceItem.parameters.sitePlanImage || null);
-                        setElevationImages(sourceItem.parameters.elevationImages || null);
-                        setCvPrompt(sourceItem.parameters.cvPrompt || '');
-                        // V304: V0를 UI 슬라이더에 표시
-                        if (sourceItem.parameters.angleIndex !== undefined) setAngleIndex(sourceItem.parameters.angleIndex);
-                        if (sourceItem.parameters.altitudeIndex !== undefined) setAltitudeIndex(sourceItem.parameters.altitudeIndex);
-                        if (sourceItem.parameters.lensIndex !== undefined) setLensIndex(sourceItem.parameters.lensIndex);
-                        if (sourceItem.parameters.timeIndex !== undefined) setTimeIndex(sourceItem.parameters.timeIndex);
-                      } else {
-                        // V305: 파라미터 없을 때 패널 열림 차단 (return 처리)
-                        setToastMessage('먼저 IMAGE TO ELEVATION을 실행해 분석하세요.');
-                        setTimeout(() => setToastMessage(''), 3500);
-                      }
-                      return;
-                    }
-                    // V304 A: IMAGE TO ELEVATION — 미선택 가드 및 즉시 실행
-                    if (fn === 'IMAGE TO ELEVATION') {
-                      const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                      if (!sourceItem?.src) {
-                        setToastMessage('이미지를 먼저 선택해주세요.');
-                        setTimeout(() => setToastMessage(''), 3000);
-                        return;
-                      }
-                      // V306: 패널 변경 없이 백그라운드 5면도 실행
-                      handleAnalyze();
-                      return;
-                    }
-                    setSelectedFunction(fn);
-                    setIsFunctionSelectorOpen(false);
-                  }}
-                  className="h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto"
-                >
-                  <span className="font-display tracking-widest uppercase font-medium text-[15px]">{fn}</span>
-                </button>
-              ))}
+                      setSelectedFunction(fn);
+                      setIsFunctionSelectorOpen(false);
+                    }}
+                    className={`h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm transition-all pointer-events-auto ${isLockedButton ? 'opacity-30 cursor-not-allowed' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
+                  >
+                    <span className="font-display tracking-widest uppercase font-medium text-[15px]">{fn}</span>
+                  </button>
+                );
+              })}
               {/* V130: + ADD TOOLS - empty hover-only button */}
               <button
                 className="h-[44px] w-full shrink-0 rounded-full bg-white/80 dark:bg-black/80 border border-black/10 dark:border-white/10 flex items-center px-5 backdrop-blur-sm shadow-sm hover:bg-black/5 dark:hover:bg-white/5 transition-all pointer-events-auto"
