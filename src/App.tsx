@@ -1148,13 +1148,7 @@ export default function App() {
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'pen') {
       if (e.pointerType === 'touch') {
-        // V286 A: 손가락 터치 → 임시 pan (tempRestoreCanvasModeRef 활용, pointerUp에서 자동 복귀)
-        tempRestoreCanvasModeRef.current = 'pen';
-        setCanvasMode('pan');
-        isDraggingPanRef.current = true;
-        setIsDraggingPan(true);
-        dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
-        e.currentTarget.setPointerCapture(e.pointerId);
+        // V333: 팜 리젝션 (Palm Rejection) - 태블릿 펜 모드에서 터치 무시
         return;
       }
       // V314: Smart Target - Enable sketching on artboard (even if blank) or any item with src/motherId
@@ -1178,13 +1172,7 @@ export default function App() {
       e.currentTarget.setPointerCapture(e.pointerId);
     } else if (canvasMode === 'eraser') {
       if (e.pointerType === 'touch') {
-        // V286 B: 손가락 터치 → 임시 pan (tempRestoreCanvasModeRef 활용, pointerUp에서 자동 복귀)
-        tempRestoreCanvasModeRef.current = 'eraser';
-        setCanvasMode('pan');
-        isDraggingPanRef.current = true;
-        setIsDraggingPan(true);
-        dragStartRef.current = { x: e.clientX - canvasOffset.x, y: e.clientY - canvasOffset.y };
-        e.currentTarget.setPointerCapture(e.pointerId);
+        // V333: 팜 리젝션 (Palm Rejection) - 태블릿 지우개 모드에서 터치 무시
         return;
       }
       // V318: Smart Target - Enable erasing on artboard (even if blank), any item with src/motherId, OR any existing path (for background cleanup)
