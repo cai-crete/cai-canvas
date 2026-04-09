@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Footprints, Plus, PanelLeft, Lasso, X, Copy, Pencil, Eraser, Type, Bot, Orbit, GitBranch, Shield, Zap, Wind, Hash, History, Target, Cpu, PenTool, Box, Scale } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
-import { saveImageToDB, loadImageFromDB, deleteImageFromDB } from './lib/imageDB';
+import { useCanvasStore } from './store/useCanvasStore';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
 import { EXPERTS as PLANNER_EXPERTS } from './lib/plannerExperts';
 import { generateDiscussion, type DiscussionResult } from './lib/plannerGenerate';
@@ -340,56 +340,18 @@ interface CanvasItem {
 }
 
 export default function App() {
+  // --- Zustand Store ---
+  const {
+    canvasItems,
+    setCanvasItems,
+    historyStates,
+    redoStates,
+    saveHistoryState,
+    undo,
+    redo,
+  } = useCanvasStore();
+
   // --- State ---
-  const [canvasItems, setCanvasItems] = useState<CanvasItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('crete_canvasItems');
-      // src is intentionally stripped before saving — restored async from IndexedDB below
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  // [V308] On mount: restore src from IndexedDB for all items
-  useEffect(() => {
-    const restoreSrcs = async () => {
-      const restored = await Promise.all(
-        (JSON.parse(localStorage.getItem('crete_canvasItems') || '[]') as CanvasItem[]).map(async (item) => {
-          if (!item.src) {
-            const src = await loadImageFromDB(item.id);
-            return { ...item, src: src || null };
-          }
-          return item;
-        })
-      );
-      setCanvasItems(restored);
-    };
-    restoreSrcs();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // [V308] Persist: save src to IndexedDB separately, strip from localStorage to avoid QuotaExceededError
-  useEffect(() => {
-    const persist = async () => {
-      // Save all srcs to IndexedDB
-      await Promise.all(
-        canvasItems.map(async (item) => {
-          if (item.src) {
-            await saveImageToDB(item.id, item.src);
-          }
-        })
-      );
-      // Save stripped state (no base64) to localStorage
-      const stripped = canvasItems.map((item) => ({ ...item, src: null }));
-      try {
-        localStorage.setItem('crete_canvasItems', JSON.stringify(stripped));
-      } catch (err) {
-        console.error('[V308] localStorage.setItem failed (stripped):', err);
-      }
-    };
-    persist();
-  }, [canvasItems]);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const selectedItemIdsRef = useRef<string[]>([]);
   const [isLassoing, setIsLassoing] = useState(false);
@@ -505,35 +467,18 @@ export default function App() {
   const [openLibraryItemId, setOpenLibraryItemId] = useState<string | null>(null);
   const [artboardPage, setArtboardPage] = useState<number>(1); // V180: Artboard pagination 1-5
 
-  // V75: History State for Undo
-  const [historyStates, setHistoryStates] = useState<CanvasItem[][]>([]);
-  // V113: Redo State
-  const [redoStates, setRedoStates] = useState<CanvasItem[][]>([]);
+  // V75/V113: historyStates / redoStates → useCanvasStore
 
   const handleUndo = () => {
-    if (historyStates.length > 0) {
-      const currentState = [...canvasItems];
-      const previousState = historyStates[historyStates.length - 1];
-
-      setRedoStates(prev => [...prev, currentState]);
-      setCanvasItems(previousState);
-      setHistoryStates(prev => prev.slice(0, -1));
-      setSelectedItemIds([]);
-      selectedItemIdsRef.current = [];
-    }
+    undo();
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
   };
 
   const handleRedo = () => {
-    if (redoStates.length > 0) {
-      const currentState = [...canvasItems];
-      const nextState = redoStates[redoStates.length - 1];
-
-      setHistoryStates(prev => [...prev, currentState]);
-      setCanvasItems(nextState);
-      setRedoStates(prev => prev.slice(0, -1));
-      setSelectedItemIds([]);
-      selectedItemIdsRef.current = [];
-    }
+    redo();
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
   };
 
   // Touch State Refs
@@ -1032,8 +977,7 @@ export default function App() {
         const selectedId = selectedItemIds[0];
         const item = canvasItems.find(i => i.id === selectedId);
         if (item && !(item.type === 'artboard' && item.isLocked)) { // V258: locked artboard cannot be resized
-          setHistoryStates(prev => [...prev, canvasItems]);
-          setRedoStates([]);
+          saveHistoryState();
 
           isResizingItemRef.current = true;
           setIsResizingItem(true);
@@ -1066,8 +1010,7 @@ export default function App() {
       });
 
       if (clickedItem) {
-        setHistoryStates(prev => [...prev, canvasItems]);
-        setRedoStates([]);
+        saveHistoryState();
 
         let currentSelection = selectedItemIds;
         if (!selectedItemIds.includes(clickedItem.id)) {
@@ -1164,8 +1107,7 @@ export default function App() {
       }
       activeDrawBoundsRef.current = { x: drawTarget.x, y: drawTarget.y, width: drawTarget.width, height: drawTarget.height };
       activeDrawTargetIdRef.current = drawTarget.id; // V258: save target for motherId
-      setHistoryStates(prev => [...prev, canvasItems]);
-      setRedoStates([]);
+      saveHistoryState();
       setIsDrawing(true);
       isDrawingRef.current = true; // V2.4: Set atomic lock
       setCurrentStroke([coords]);
@@ -1187,8 +1129,7 @@ export default function App() {
         return;
       }
       activeDrawBoundsRef.current = { x: eraseTarget.x, y: eraseTarget.y, width: eraseTarget.width, height: eraseTarget.height };
-      setHistoryStates(prev => [...prev, canvasItems]);
-      setRedoStates([]);
+      saveHistoryState();
       isErasingRef.current = true;
       eraseAtPoint(coords);
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -1373,8 +1314,7 @@ export default function App() {
       const width = Math.abs(coords.x - textStartPos.x);
       const height = Math.abs(coords.y - textStartPos.y);
       if (width > 10 && height > 10) {
-        setHistoryStates(prev => [...prev, canvasItems]);
-        setRedoStates([]);
+        saveHistoryState();
         // V258 C-5: Clip text box to parent item bounds
         const textParent = canvasItems.find((i: CanvasItem) => i.id === activeDrawTargetIdRef.current);
         const rawX = Math.min(coords.x, textStartPos.x);
@@ -2171,8 +2111,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                       // V2.6.0: Save to local folder
                       saveImageToLocal(generatedSrc, 'viewpoint');
                       
+                      saveHistoryState();
                       setCanvasItems(prev => {
-                        setHistoryStates(prevH => [...prevH, prev]);
                         // V283 D: siblings 필터 단순화 — sourceItem.id 직접 참조
                         const siblings = prev.filter((i: CanvasItem) => i.type === 'generated' && i.motherId === sourceItem.id);
                         if (siblings.length === 0) {
@@ -2346,9 +2286,9 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                     saveImageToLocal(generatedSrc, 'sketch');
 
                     // V276/V278 G-5: editVersions 분기 (generated/upload 전용, sketch_generated 제외)
+                    saveHistoryState();
                     if (sourceItem?.editVersions && sourceItem.type !== 'sketch_generated') {
                       setCanvasItems((prev: CanvasItem[]) => {
-                        setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
                         return prev.map((i: CanvasItem) => {
                           if (i.id !== sourceItem.id) return i;
                           // V284 C: EDIT XX label 폐기
@@ -2411,8 +2351,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             sketchPrompt  // V269
                           }
                         };
-                        
-                        setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
                         
                         // V280: 소스 아트보드는 생성 후 SKETCH로 지정 (단, EDIT 상태는 제외)
                         if (sourceItem?.type === 'artboard') {
@@ -2496,8 +2434,8 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
             plannerPrompt,  // V268
           },
         };
+        saveHistoryState();
         setCanvasItems((prev: CanvasItem[]) => {
-          setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
           return [...prev, newItem];
         });
         // V268: Reset PLANNERS panel after generation
@@ -2809,7 +2747,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                     parameters: null,
                     isLocked: false,
                   };
-                  setHistoryStates((prev: CanvasItem[][]) => [...prev, canvasItems]);
+                  saveHistoryState();
                   setCanvasItems((prev: CanvasItem[]) => [...prev, newArtboard]);
                 }}
                 className="w-11 h-11 flex items-center justify-center rounded-full bg-black text-white hover:bg-neutral-800 transition-colors shadow-lg pointer-events-auto hover:cursor-pointer"
@@ -3156,6 +3094,21 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
             );
           })()}
 
+          {/* V334: Infinite Grid Overlay — viewport-fixed, tracks canvas coordinates */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage: `
+                linear-gradient(to right, rgba(128,128,128,0.1) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(128,128,128,0.1) 1px, transparent 1px),
+                linear-gradient(to right, rgba(128,128,128,0.2) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(128,128,128,0.2) 1px, transparent 1px)
+              `,
+              backgroundSize: `${12 * canvasZoom / 100}px ${12 * canvasZoom / 100}px, ${12 * canvasZoom / 100}px ${12 * canvasZoom / 100}px, ${60 * canvasZoom / 100}px ${60 * canvasZoom / 100}px, ${60 * canvasZoom / 100}px ${60 * canvasZoom / 100}px`,
+              backgroundPosition: `calc(50% + ${canvasOffset.x}px) calc(50% + ${canvasOffset.y}px)`,
+            }}
+          />
+
           {/* V124: Main Artboard Area (Scaled div containing all actual items) */}
           <div
             className="absolute inset-0"
@@ -3168,24 +3121,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
             <div
               className="w-full h-full flex items-center justify-center relative touch-none pointer-events-none"
             >
-              {/* Infinite Composite Grid Background (5x5 Module, 60px/12px) */}
-              <div
-                className="absolute pointer-events-none"
-                style={{
-                  top: '-15000px', left: '-15000px',
-                  width: '30000px', height: '30000px',
-                  backgroundColor: 'rgba(0, 0, 255, 0.01)',
-                  backgroundImage: `
-                  linear-gradient(to right, rgba(128,128,128,0.1) 1px, transparent 1px),
-                  linear-gradient(to bottom, rgba(128,128,128,0.1) 1px, transparent 1px),
-                  linear-gradient(to right, rgba(128,128,128,0.2) 1px, transparent 1px),
-                  linear-gradient(to bottom, rgba(128,128,128,0.2) 1px, transparent 1px)
-                `,
-                  backgroundSize: '12px 12px, 12px 12px, 60px 60px, 60px 60px',
-                  zIndex: -1
-                }}
-              />
-
               {/* Render Canvas Items (V56: Standardized Center-Origin Rendering) */}
               {/* V253: path type is rendered in SVG overlay only — skip here */}
               {canvasItems.filter((item: CanvasItem) => item.type !== 'path').map((item: CanvasItem) => {
@@ -3520,6 +3455,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                           <>
                             <button
                               onClick={() => {
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => {
                                   let newX = item.x + item.width + 120;
                                   let newY = item.y;
@@ -3543,7 +3479,6 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                                     parameters: null
                                   };
 
-                                  setHistoryStates((prevH: CanvasItem[][]) => [...prevH, prev]);
                                   return [...prev, newArtboard]; 
                                 });
                               }}
@@ -3567,8 +3502,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
                                 setSelectedItemIds([]);
                               }}
@@ -3644,8 +3578,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
                                 setSelectedItemIds([]);
                               }}
@@ -3665,8 +3598,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                                 // V308: 연결선을 유지하면서 스케치 가능 상태로 전환
                                 // motherId 유지 → 모체와의 Bezier 연결선 보존
                                 // editVersions 미생성 → < > 화살표 방지
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) => {
                                   if (i.id === item.id) {
                                     return {
@@ -3701,8 +3633,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
                                 setSelectedItemIds([]);
                               }}
@@ -3721,8 +3652,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                                 // V308: 제자리에서 스케치 가능 상태로 전환
                                 // motherId 유지 → 모체와의 Bezier 연결선 보존
                                 // editVersions 미생성 → < > 화살표 방지
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.map((i: CanvasItem) => {
                                   if (i.id === item.id) {
                                     return {
@@ -3757,8 +3687,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             {/* V281: library 버튼을 ANALYZED 뷰(원본 모체)로 이전하므로 여기선 삭제됨 */}
                             <button
                               onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
                                 setSelectedItemIds([]);
                               }}
@@ -3818,8 +3747,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                             <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
                             <button
                               onClick={() => {
-                                setHistoryStates((prevH: CanvasItem[][]) => [...prevH, canvasItems]);
-                                setRedoStates([]);
+                                saveHistoryState();
                                 setCanvasItems((prev: CanvasItem[]) => prev.filter((i: CanvasItem) => i.id !== item.id && i.motherId !== item.id));
                                 setSelectedItemIds([]);
                               }}

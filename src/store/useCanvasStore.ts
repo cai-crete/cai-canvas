@@ -128,6 +128,19 @@ export const useCanvasStore = create<CanvasState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
+          // 1회성 마이그레이션: App.tsx legacy key(crete_canvasItems) → canvas-storage
+          if (state.canvasItems.length === 0) {
+            try {
+              const legacy = localStorage.getItem('crete_canvasItems');
+              if (legacy) {
+                const parsed = JSON.parse(legacy) as CanvasItem[];
+                state.setCanvasItems(parsed);
+                localStorage.removeItem('crete_canvasItems');
+              }
+            } catch {
+              // 마이그레이션 실패 시 무시 — 데이터 없는 상태로 기동
+            }
+          }
           // Re-load actual raw base64 data from IndexedDB
           setTimeout(() => state.loadImagesFromDB(), 0);
         }
