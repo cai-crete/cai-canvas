@@ -1,303 +1,67 @@
-# **[System Master Document] App Integration Process**
+# **[System Master Document] App Integration Process (Frontend I/O Model)**
 
-본 문서는 앱의 최초 구동 시점부터, 사용자가 이미지를 업로드하고 분석을 거쳐 최종 렌더링을 실행하기까지의 '시스템 통합 제어 흐름'을 타임라인 순으로 명세합니다.
-
----
-
-## **PHASE 0. INIT (시스템 초기화 및 구조 대기)**
-앱이 최초 로드될 때의 초기 상태 설정.
-
-*   **UI 상태**: 다크모드/라이트모드 설정 로드.
-*   **Canvas 초기화**: 빈 무한 캔버스(가운데 정렬)와 3x3 비율의 합성 그리드 출력.
-*   **Tool Load**: 컨트롤 바는 하단 중앙에 배치되며 기본 모드는 Select (Cursor) 유지. 옵션 패널(Right Sidebar)은 닫혀있음.
+본 문서는 현재 앱(`cai-canvas`)의 "Integration Process"를 시각적 I/O (Input/Output) 프론트엔드 관점에서 정의합니다. 
+과거 앱 내부에서 모든 파라미터 추론과 시점 변환(5-IVSP 등)을 처리하던 모놀리식(Monolithic) 구조에서 벗어나, **"하네스 엔지니어링(Harness Engineering) 제어 로직은 외부 시스템으로 이관하고 본 앱은 순수 무한 캔버스 프론트엔드로 동작한다"**는 전제하에 시스템 구성을 명세합니다.
 
 ---
 
-> **[System Coordinate Constants — Architectural Front-Identification Logic]**
->
-> 본 시스템의 모든 PHASE에서 공통으로 적용되는 **건축 방위 좌표계 상수**. 정면 인식의 절대적 기준.
->
-> | 모서리 코드 | 위치 | 설명 |
-> |---|---|---|
-> | **Blue (좌전)** | Front-Left | 건축물 정면을 바라보았을 때의 왼쪽 앞 모서리 |
-> | **Red (우전)** | Front-Right | 건축물 정면을 바라보았을 때의 오른쪽 앞 모서리 |
-> | **Yellow (좌후)** | Back-Left | 건축물의 왼쪽 뒤 모서리 |
-> | **Green (우후)** | Back-Right | 건축물의 오른쪽 뒤 모서리 |
->
-> **정면(Front, 06:00)** = Blue–Red 선(Front Edge). 이 방향이 모든 PHASE의 시점 연산 원점(Origin).
+## **1. 권한 및 역할의 분리 (Architecture Redefinition)**
+
+### 1-A. 외부 하네스 시스템 (External Harness System - 미래 구축 대상)
+*   **역할**: 본 프론트엔드 앱 바깥에서 구축될 핵심 미들웨어/컨트롤러입니다. 
+*   업로드된 사진 데이터를 바탕으로 시각·광학적 맥락(안전벨트/Harness)을 구축하고, 개별 백엔드 모듈 연산에 필요한 데이터 오케스트레이션(라우팅)을 100% 담당합니다. 
+*   `cai-canvas` 프론트엔드는 시스템 로직 상 이 외부 하네스에 의존(위임)하게 됩니다.
+
+### 1-B. 무한 캔버스 프론트엔드 (Current App: `cai-canvas`)
+*   **역할**: 시각적 사용자 인터페이스 제어 및 결과물 시각화 (I/O).
+*   **주요 책임**: 사진 업로드 환경 제공(Ingestion), 캔버스 줌/팬 등의 뷰포트 관리, 사용자의 UI 인풋(Viewpoint 슬라이더, 프롬프트 텍스트 등) 수집, 그리고 서버망으로부터 반환된 데이터를 캔버스 상에 배치하는 물리적 렌더링.
+
+### 1-C. 백엔드 연동 구조 (Decoupled Backend Services)
+*   `IMAGE TO ELEVATION`, `CHANGE VIEWPOINT`, `SKETCH TO IMAGE` 등 기존의 다양한 기능들은 프론트엔드 내부에 얽힌 로직이 아니라, 각각 고유의 분석 로직과 프롬프트 구성을 가진 **독립된 백엔드 서비스망(Server APIs)** 묶음으로 간주합니다.
+*   **"IMAGE TO ELEVATION" 종속성 해제**: 기존처럼 "IMAGE TO ELEVATION을 무조건 먼저 실행해야 CHANGE VIEWPOINT가 작동한다"는 데이터 종속성을 완전히 폐기했습니다. 각 패널은 독립적으로 이미지를 타겟팅하여 자신의 백엔드망과 통신합니다.
 
 ---
 
-## **PHASE 1. INGESTION (이미지 주입 및 기본 시점 분석)**
-사용자가 이미지를 업로드하는 즉시 시스템이 개입하여 분석을 시작하는 자동화 단계입니다. 별도의 버튼 클릭 없이 PHASE 2와 연계되어 실행됩니다.
+## **2. PROCESS CONTROL FLOW (프론트엔드 I/O 관점)**
 
-1.  **Image Upload Event**: 사용자가 .jpg, .png 등 건축물 이미지를 업로드.
-2.  **State Reset**: 기존의 생성된 이미지(generatedImage) 및 배치도(sitePlanImage)를 초기화(Null)하고 UI를 갱신.
-3.  **Automatic Viewpoint Analysis (분석 개시)**: 
-    *   **Engine:** `gemini-3.1-pro-preview` (MODEL_ANALYSIS)
-    *   **Trigger**: 이미지 업로드 완료 시 즉시 실행.
-    *   입력된 이미지의 "정면(06:00) 기준점" 대비 현재 관찰자의 시점 변수(Camera Angle, Altitude, Lens 설정)를 판단하여 상태(State) 값으로 업데이트.
-    *   옵션 패널(Right Sidebar)이 자동으로 열리며 분석 중 텍스트가 표시됨.
+프론트엔드 관점에서 사용자가 이미지를 올리고 최종 결과를 캔버스에서 확인하기까지의 흐름을 3-PHASE로 정의합니다.
 
----
+### **PHASE 1: I/O Ingestion (프론트엔드 물리적 입력 및 Payload 준비)**
+사용자가 애플리케이션에 시각적 소스를 집어넣어, 시스템이 이를 인지하고 통신 페이로드(Payload)를 구성하는 단계입니다.
 
-## **PHASE 2. ARCHITECTURAL INFERENCE (심층 설계 추론 및 렌더링 파라미터화)**
-단순 시점 분석을 넘어 보이지 않는 면(Blind Spot)을 채우기 위한 백그라운드 프로세싱(Protocol A).
+1.  **Image Upload & Canvas Anchoring (이미지 안착)**
+    *   사용자가 `.jpg`, `.png` 등의 건축물 이미지를 캔버스(아트보드)에 업로드.
+    *   프론트엔드는 이 이미지의 X/Y 캔버스 절대 좌표, Width/Height 비율, Base64 바이너리 데이터를 상태값(Store)에 할당.
+2.  **Context (Payload) Setup**
+    *   캔버스에 타겟팅(Select)된 원본 이미지가 존재하면, 프론트엔드는 향후 외부 하네스로 전송할 "기초 컨텍스트 꾸러미(Payload)"를 묶을 준비를 함.
+    *   여기에는 원본 소스 이미지 자체뿐 아니라, 사용자가 추가로 입력한 스케치나 캔버스 위의 상대적 좌표 구성물 등이 포함될 수 있음.
 
-> **[Protocol Engine 자동 발동 — `System Protocol Image to Elevation-v2.2`]**
->
-> **이미지 업로드가 완료되면 별도 클릭 없이 PHASE 2가 즉시 개시(Trigger)됩니다.**
-> 직후, **`gemini-3.1-flash-image-preview`** 모델을 가동하여 업로드 이미지를 그대로 재생성(Regeneration)한 뒤, 이를 원본으로 대체하여 이후 프로세스의 순수성(Purity)을 확보합니다. 이와 동시에 **`System Protocol Image to Elevation-v2.2`** (Protocol A: Architectural Logic Engine)가 전체 실행 엔진으로 자동 발동됩니다.
->
-> 이 프로토콜은 입력된 2D 이미지의 가시권 상수를 스캔하고, 내부 조닝(Zoning) 로직을 통해 비가시권 영역의 3D 절대 좌표 및 속성 데이터를 결정론적으로 역설계합니다. 형태(Geometry)와 속성(Property)의 1:1 매칭 원칙(ensemble_pair)에 따라 연산을 분리하여 AI Hallucination을 원천 차단합니다.
->
-> **발동 흐름 (UX Flow):**
-> `이미지 업로드` → `원본 즉시 캔버스 출력` → `Background Regeneration 시작` → `재생성 완료 시 원본 소스 교체(Replace)` → `Protocol A 분석 자동 트리거` → `Phase 1~4 순차 실행` → `Protocol B 이관`
->
-> **[단방향 추론 (One-Way Inference) 및 FAIL 검증 프로토콜]**
-> *   수집된 파라미터가 불완전할 경우, 억지로 이전 단계로 돌아가 과거 이미지를 다시 살피거나 과거 데이터를 엎어쓰는 역추론(Reverse Inference)을 철저히 금지합니다.
-> *   Phase 1~4 구동 중 파라미터 무결성이 훼손될 시 즉결 처분하는 **FAIL 검증(루프 브레이커)**을 가동합니다.
-> *   AI 반환 데이터가 스키마를 위반할 경우 콘솔에 `[PROTOCOL-FAIL]`을 출력하고 즉시 전체 파이프라인을 파기 및 종료(Abort)하여 프로세스가 엉킨 좀비 상태(Zombie State)가 되는 것을 방지합니다.
+### **PHASE 2: Harness & Backend Routing (외부 제어망 위임)**
+사용자가 우측 툴 패널(예: CHANGE VIEWPOINT)을 조작하여 "실행(ANALYZE / GENERATE)" 버튼을 누르는 순간, 프론트엔드의 역할은 Payload를 보내고 대기(Loading)하는 상태로 전환됩니다.
 
-1.  **System Protocol Image to Elevation-v2.2 연동**: 가시권 이미지에서 건축적 당위성을 역산하는 4단계 파이프라인 가동.
-    *   **Phase 1: Visual Diagnosis & Element Extraction** — 가시권 진단 및 건축 요소(층고, 기둥 경간, PBR 물성, 창면적비) 추출, 대지 유형 판정.
-    *   **Phase 2: Context Inference & Zoning** — 내부 조닝 역산: 코어 좌표 동결, 주요 실공간 외벽 배분, 창면적비 입면 연동.
-    *   **Phase 3: Blind Spot Reconstruction** — 비가시권(배면/측면/지붕) 3D 기하학 입면을 대지 유형(Type A/B)에 따라 결정론적으로 재구성.
-    *   **Phase 4: Design Specification Output** — 모든 확정 데이터를 서술형 텍스트가 아닌 3D 좌표 기반 JSON 트리로 변환 후 AEPL 스키마로 패키징.
+1.  **외부 하네스로의 통신 발송 (Request)**
+    *   프론트엔드는 Phase 1에서 준비된 Payload(선택한 이미지 및 UI 슬라이더 값 등)를 파라미터화하여 쏘아 보냅니다.
+    *   *(현재 아키텍처 상 외부 하네스 미구축 상태에서는, 프론트엔드가 자체적으로 Gemini API 모델에 JSON 프롬프트를 직결하여 이 흐름을 임시 모방하고 있습니다.)*
+2.  **독립 백엔드 서비스망 연산 (Harnessing Task)**
+    *   전달받은 하네스망은 해당 타겟 모듈(예: CHANGE VIEWPOINT의 `ANALYZE` 3섹션 광학 분석 API망)로 트래픽을 분기합니다. 
+    *   모든 심오한 AI 추론, 5면 전개도, 시점 궤도 연산, 맥락 추론은 프론트엔드 밖에서 이뤄집니다.
+3.  **UI Waiting State (로딩/피드백)**
+    *   이 기간 중 프론트엔드는 "ANALYZING..." 등 시각적 로딩 컴포넌트(Spinner)만 돌리며 UI 상호작용(다른 생성 버튼 클릭 등)을 임시 블락(Lock)합니다.
 
-> **[Protocol Reference 자동 연동 — `Parameter Library` (AEPS-v4)]**
->
-> `System Protocol Image to Elevation-v2.2`의 Phase 4(Design Specification Output)가 완료되면, **`Parameter Library`(AEPS-v4: Architectural Elevation Parameter System v4)** 가 자동으로 참조됩니다.
->
-> 이 프로토콜은 추출된 건축 요소를 `ensemble_pair` 원칙에 따라 형태(Geometry)와 속성(Property)의 상호보완적 이분화 기준을 정의하는 **시스템 헌법(Constitution)** 으로 작동합니다. Protocol A의 최종 산출물인 `1_Geometry_Data_MASTER` + `2_Property_Data_SLAVE` 패키징의 규격이 이 프로토콜에서 확정됩니다.
->
-> **연동 역할:** `ensemble_pair` 단독 유효성 규칙의 근거 문서 | **핵심 산출물:** `1_Geometry_Data_MASTER` + `2_Property_Data_SLAVE` → Protocol B 이관
+### **PHASE 3: Canvas Synchronization (프론트엔드 시각화 및 동기화)**
+백엔드 엔진에서의 생성 연산이 종료되고 데이터가 다시 프론트엔드로 반환되는 확정 단계입니다.
 
-2.  **Parameter Library 연동**: 추출된 건축 요소를 `ensemble_pair` 원칙에 따라 형태(Geometry)와 속성(Property)으로 이분화.
-
-> **`ensemble_pair` 단독 유효성 규칙 (핵심 원칙)**
-> *   `1_Geometry_Data (Shape Anchor)`: Z-Depth/Normal Map 기반 Image Prompt로만 작동. 픽셀의 절대 위치와 3D 좌표의 시각적 틀을 확정하며, 단독으로 렌더링에 진입 불가.
-> *   `2_Property_Data (Data Binder)`: 파라미터 기반 Text Prompt로만 작동. 확정된 기하학적 틀 내부에 치수와 광학 물성을 주입하며, Geometry 없이 단독 연산 불가.
-> *   **`ensemble_pair`가 성립된 상태(Geometry + Property)에서만 렌더링 실행 허가.**
-
-3.  **Elevation Parameter Extraction (히든 연산)**:
-    *   **Engine:** `gemini-3.1-pro-preview` (Phase 1과 동시 연산 처리됨)
-    *   건축물의 매스 타입(Mass Typology), 코어 형태(Core Typology), 주요 마감재(Base Material), 창호 종류(Fenestration), 돌출부 여부(Balcony 등)을 자동으로 분석하여 JSON 트리 구성.
-    *   해당 데이터는 추출 즉시 불변의 기준값(Constant Reference)인 `analyzedOpticalParams` 및 `elevationParams` 상태 변수에 고정 기록됨.
-    *   **AEPL 핸드오버 포맷**: Protocol A의 최종 산출물은 `1_Geometry_Data_MASTER`(형태 확정자, ControlNet Image Prompt로 변환)와 `2_Property_Data_SLAVE`(정보 귀속자, Text Prompt로 변환)로 패키징되어 Protocol B에 전달됨.
-
-4.  **Contextual Image Synthesis (입면 합성 및 보정)**:
-    *   **Target:** `Original Input Image` + `elevationParams`
-    *   **Process**:
-        *   원본 이미지에서 명확하게 파악할 수 있는 정교한 디자인, 텍스처, 구조적 특징(Front, 일부 측면)을 원천 데이터(Source of Truth)로 유지.
-        *   원본에서 관측 불가능한 배면(Rear view) 및 측면부 등 사각지대(Blind Spot)는 'Step 3'에서 도출된 `elevationParams` 기반으로 맥락적(Contextual)으로 지능적 추론 및 연결.
-        *   (결과) 원본 건축물의 디자인 정체성을 100% 반영하면서 사각지대까지 채워진 완전한 마스터 데이터 확보.
-
-5.  **Architectural Multi-View Generation (5면 입면 생성 및 추출)**:
-    *   **Engine:** `gemini-3.1-flash-image-preview` (MODEL_IMAGE_GEN)
-    *   **View Camera Map (뷰별 카메라 절대 좌표)**:
-
-| 뷰 | Azimuth | Altitude | 정방향 벡터 | 시계판 좌표(Clock-face) | 슬롯 ID |
-|---|---|---|---|---|---|
-| 정면 (Front) | 0° | 0° | (0, -1, 0) | 06:00 | Primary_Facade |
-| 탑/평면 (Top) | 0° | 90° | (0, 0, 1) | Zenith | Top_Elevation |
-| 우측면 (Right) | 90° | 0° | (1, 0, 0) | 03:00 | Right_Facade |
-| 좌측면 (Left) | 270° | 0° | (-1, 0, 0) | 09:00 | Left_Facade |
-| 배면 (Back) | 180° | 0° | (0, 1, 0) | 12:00 | Rear_Facade |
-
-    *   **Process**:
-        *   `System Protocol B` (Node 3)를 가동하여 'Step 4'에서 합성 및 완성된 마스터 데이터를 기반으로 [Top, Front, Right, Rear, Left]가 포함된 **십자(Cross) 레이아웃 통합 건축 참조 시트**를 단일 패스로 생성.
-        *   생성된 통합 이미지에서 **Top View(Roof Plan)** 영역을 수학적으로 계산하여 크롭(Crop) 추출.
-        *   추출된 평면 이미지를 `SITE PLAN` 상태에 매핑하여 출력.
-    *   **[ORIENTATION RULE — 정면 고정 선언]**:
-        *   `FRONT Elevation`은 5면 통합 시트 이미지 레이아웃의 **하단(Bottom)**에 고정 정렬. (`Row 2, Col 1` 위치)
-        *   생성 완료 시, 시트의 `FRONT Elevation` 슬롯 = 해당 건축물의 **절대적 정면(06:00)** 기준값으로 시스템에 고정. (`Primary_Facade` 상태 변수에 잠금)
-        *   `Top View(Roof Plan)`의 **하단 방향 = FRONT 방향**으로 방위 일치. Blue–Red 선(정면 모서리)이 Top View 하단에 위치하도록 정렬.
-        *   이 고정 선언 이후, 어떠한 PHASE에서도 정면 방향을 재해석하거나 임의로 변경하는 연산 차단.
-
-    *   **완료 조건**: 5개 뷰 각각의 `ensemble_pair`가 성립되어 앙상블 조립이 완료된 시점에 시각화 엔진(Protocol B) 이관 트리거 발동.
-    *   완성 시 "Analysis Report" 탭의 로딩 상태 종료.
+1.  **데이터 반환 및 Parsing**
+    *   프론트엔드는 Base64 형식의 렌더링 이미지와, 이에 귀속된 String/JSON 메타데이터(Angle, Lens, 분석결과 Report 등)를 수신.
+2.  **Item Instance 생성 및 Canvas Store 동기화**
+    *   프론트엔드는 수신한 반환 객체를 **"새로운 캔버스 아이템 인스턴스(CanvasItem)"**로 인스턴스화합니다.
+    *   이때 모체(Mother Image)와의 시각적 위계 배열(예: 아래로 96px 띄워서 자동 배치)을 계산하여 좌표(X,Y)를 확정합니다.
+3.  **물리적 렌더링 (Physical Output)**
+    *   갱신된 상태가 무한 캔버스 DOM에 마운트되며 시각화 표출 완료. 로딩 상태 스피너가 해제됩니다.
+    *   결과물은 고유의 `id`와 `motherId` 파라미터를 유지하여, 추후 무한 확장되는 그래프 구조에서도 자신의 이력(History/Genealogy)을 보존합니다.
 
 ---
 
-## **PHASE 3. VIEWPOINT CONFIGURATION (5-IVSP 시점 설정)**
-사용자가 도출된 결과물과 UI 상의 슬라이더를 확인하고, PHASE 2의 건축 설계 데이터에 적용할 관찰자 시점을 설정하는 5-IVSP 실행 단계.
-
-> **[Protocol Engine 자동 발동 — `protocol-Change Viewpoint-v3`]**
->
-> PHASE 3가 개시되는 순간, **`protocol-Change Viewpoint-v3`** (5-Point Integrated Viewpoint Simulation Architect, 5-IVSP)가 전체 실행 엔진으로 자동 발동됩니다.
->
-> 이 프로토콜은 사용자의 직관적 시점 명령(슬라이더 값)을 수치 지리 좌표로 변환하고, 4-Layer Synergy와 3-Phase Simulation을 통해 결정론적 최종 실행 프롬프트를 생성합니다.
->
-> **발동 흐름:**
-> `Action Trigger` → `Protocol 초기화 (Ontological Declaration)` → `Phase 1: Coordinate Anchoring` → `Phase 2: Optical Engineering` → `Phase 3: Layering Execution` → `SMS 자동 매핑` → `Final Execution Prompt 생성`
-
-1.  **Action Trigger**: 사용자가 원하는 시점(viewpoint)을 입력한 후 우측 하단의 Generate 버튼 클릭. (초기 3장 동시 생성 설정은 비활성화/삭제되었으며, 지정한 단일 시점 1장만 출력됨)
-    *   **[보안: Phase 3 Fail 검증]**: 입력된 시점 파라미터(Angle, Altitude 등)의 유효성을 즉시 검사합니다. 비정상 값이 감지되면 콘솔에 `[PROTOCOL-FAIL]`을 에러로 출력하고 해당 렌더링 작업을 중단(Phase 3 재추론 대기)합니다.
-> **5-IVSP 온톨로지 선언 (Layer 1: Governance)**
-> *   **Subject (불변 상수)**: 입력된 건축물의 형태(Geometry)는 수정 불가능한 "Completed Reality"로 선언. 비율, 구조, 디테일은 Immutable Constants.
-> *   **Observer (변수)**: 사용자의 시점 명령은 건축물을 수정하는 지시가 아닌, 관찰자(Brown Point)의 카메라 궤도 경로(Camera Orbit Path). 오직 관찰자의 위치와 렌즈 설정만 변수.
-> *   **Sanctuary Mode**: 온톨로지가 위반되는 명령(창문 개수 변경, 층수 변경 등) 감지 시 렌더링 실행 중단.
-
-3.  **Deterministic Prompt Assembly (5-IVSP 실행 엔진 가동)**:
-
-    **5-IVSP 연동 지식 문서 구조:**
-    *   `{Viewpoint Change Simulation Technical Spec}` **(헌법)**: Sanctuary Mode, 재질 잠금, Reality Definition→Strategy→Analysis→Execution→Polish 파이프라인 제어.
-    *   `{protocol-5_Point}` **(실행 엔진)**: 직관→좌표 변환, 5-Point Matrix 벡터 계산, 최적 렌즈/퍼스펙티브 자동 선택.
-    *   `{Viewpoint Analysis 1 & 2}` **(시각 사전)**: 수직 사전(고도/수평선 관계), 수평 사전(방향 로직/볼륨 제어) 정의.
-    *   `{protocol-Blind Spot Inference}` **(추론 엔진)**: 비가시권 설계 DNA 연장, 내부 기능(주거/사무) 역추론으로 코어 위치 및 후면 창호/도어 배치 결정.
-    *   `{Protocol A,B-MACRO-V1}` **(도시 맥락 엔진)**: 가시권 진단 및 비가시권(사각지대)의 배경/전경 물리 환경 구축, 동적 시차(Parallax) 대응 등 시점 변경 시 대지에 대한 거시적 뼈대와 규칙을 제공함.
-    *   `{Macro-AEPS-V2}` **(거시적 파라미터 스키마)**: E-Series(외부/도시) 및 S-Series(대지 내부)의 형태(Geometry Master)와 속성(Property Slave)을 `ensemble_pair`로 조립하여 대지 및 환경 변수를 렌더링 시스템에 넘기는 파라미터 매뉴얼.
-
-    **5-IVSP 3단계 실행 프로세스:**
-    *   **Phase 1: Coordinate Anchoring** — 사용자 슬라이더 입력(Angle, Altitude)을 기준 방위가 고정된 **'시계판 좌표계(Clock-face Coordinates, 정면=06:00, 우측=03:00, 좌측=09:00, 배면=12:00)'**로 변환하고 Brown Point(관찰자)의 GPS 좌표 확정. (정면 Facade = 06:00 기준)
-        *   **[정면 기준 전이]**: PHASE 2 Step 5에서 고정된 `Primary_Facade`(FRONT Elevation 슬롯)가 이 단계의 **06:00 원점(Origin)**으로 자동 전이됨. 절대 방위(North)가 아닌 건축물의 설계 정면이 기준.
-    *   **Phase 2: Optical Engineering** — **Haversine 공식**으로 관찰자↔건축물 거리 계산 후 최적 렌즈(mm) 및 퍼스펙티브 자동 선택. 정면=1-Point, 코너=2-Point Perspective.
-    *   **Phase 3: Layering Execution** — 확정된 좌표에 재질(Material Injection) 및 광학 레이어 적용. 비가시권(Rear/Side) 이동 시 `protocol-Blind Spot Inference` 엔진 자동 가동.
-        > **[!IMPORTANT] 대지에 대한 프로토콜 가동**
-        > 카메라 시점 궤도 이동 시, 대상 건축물뿐만 아니라 **'대지에 대한 프로토콜 (Macro Urban/Site Context)'**이 철저히 동반 작동합니다. 
-        > `Protocol A,B-MACRO-V1` (도시 맥락 엔진)의 법칙에 따라 가로망과 인접 건물의 시차(Parallax)가 동기화되며, `Macro-AEPS-V2` 스키마를 통해 1_Geometry_Data(대지 형태)와 2_Property_Data(환경 속성)가 결합되어 비가시권 배경을 완벽히 재조립해 냅니다.
-
-
-    **Protocol B 물성 위계 조립 (5면 전개도 렌더링 시):**
-    *   사용자가 조정한 **광학/시점 파라미터** (Angle 01:30, Altitude 45deg, 85mm 등) 결합.
-    *   Phase 2에서 메모리에 숨겨둔 **건축 입면 파라미터** (Exposed Concrete, Punch Window 등)를 호출하여 Step 5: Structural & Material Parameters로 강제 주입.
-    *   **B-1. Geometry Master Locking (형태 고정)**:
-        *   5개 뷰 시퀀스를 순회하며 건축물뿐만 아니라 Macro-AEPS-V2의 E-Series/S-Series를 포괄하는 `1_Geometry_Data_MASTER`에서 절대 수치 추출.
-        *   재질 연산이 보류된 순수 3D 화이트박스 메쉬(도시 맥락 포함) 자동 생성 후, Z-Depth / Surface Normal / 3-Tier Line 3종 레퍼런스 맵 추출.
-        *   ControlNet에 최대 가중치(1.0)로 적용하여 픽셀의 절대 좌표 시스템에 고정.
-    *   **B-2. Property Slave Injection (속성 주입)**:
-        *   건축물 물성과 Macro-AEPS-V2 환경 속성을 결합한 `2_Property_Data_SLAVE`만 활용하여 PBR 물성(알베도, 거칠기, 반사율), 유리 굴절/투과율, AO 그림자, 표면 풍화 레벨 등 3단계 물성 위계 텍스트 프롬프트 조립.
-        *   텍스트 내 형태를 암시하는 단어를 배제하여, 이미지 프롬프트가 확정한 기하학적 뼈대를 보호.
-    *   **B-3. Dynamic AO 설정**: 도시 맥락 파라미터를 통합 적용하여 동적 환경광 차폐(Dynamic AO) 기본 강도 설정.
-
-    **최종 출력 포맷 (3파트 구조, `template.md` 필수 준수):**
-    *   `[Metacognitive Coordinate Analysis]`: 입력 벡터 변환 결과(시계 방향) + 5-Point 상태 판정 + 거리 분석 기반 렌즈 그룹 선택.
-    *   `[Scenario & Optical Simulation]`: 매핑된 시나리오 + 카메라 바디/렌즈mm/조리개 스펙.
-    *   `[Final Execution Prompt]`: 아래 **`template.md`** 구조를 반드시 준수하여 결정론적 프롬프트 생성. 임의 프롬프트 생성 금지.
-
-    ```
-    # SYSTEM: 5-Point Integrated Viewpoint Simulation Architect (5-IVSP)
-
-    # GOAL
-    Change the angle of view of the provided architectural image to a specific new perspective without altering the building's original geometry, materials, or style. Execute a "Physical Movement Command" within a completed 3D reality — precise Coordinate-Based Virtual Photography.
-
-    # CONTEXT
-    - Ontological Status: The input image is a "Completed Architectural Reality." Fixed physical object, not a sketch.
-    - Operational Logic: Intuition-to-Coordinate Translation applied.
-    - Geometric Sanctuary: The building's proportions, structure, and ALL details are Immutable Constants. Only the observer (Brown Point) moves.
-
-    # ROLE
-    Coordinate Controller & Virtual Architectural Photographer
-
-    # ACTION PROTOCOL (MANDATORY EXECUTION WORKFLOW)
-    ## Pre-Step: Reality Anchoring & Camera Delta Calculation
-    - V₀ (Current Camera Position):
-        Angle: [V0_Angle] o'clock | Altitude: [V0_Altitude] | Lens: [V0_Lens] | Time: [V0_Time]
-        This is the exact camera position of IMAGE 1 (Source of Truth).
-    - V₁ (Target Camera Position):
-        Angle: [V1_Angle] o'clock | Altitude: [V1_Altitude] | Lens: [V1_Lens] | Time: [V1_Time]
-    - Δ Movement Vector: Orbit from V₀ → V₁
-        CRITICAL CONSTRAINT: You MUST execute this precise Physical Camera Orbit. DO NOT simply output the V₀ view again.
-
-    ## Step 1: Coordinate Anchoring & Vector Calculation
-    - Clock-face Protocol: 06:00 = Front, 03:00 = Right, 09:00 = Left, 12:00 = Rear.
-    - Target Vector: [V1_Angle]
-    - Constraint: The output image MUST clearly display the [V1_Angle] view, utilizing IMAGE 2 as the geometric blueprint for that side.
-
-    ## Step 2: Scenario Mapping & Optical Engineering
-    - Scenario: [Scenario String]
-    - Lens: [Lens String]
-    - Time of Day: [Time String]
-
-    ## Step 3: Layering & Blind Spot Inference (Void Mitigation)
-    - Context Void Mitigation: If orbiting to Rear (12:00) or Side, synchronize Foreground/Background. Spawn the adjacent building's mass scale and skyline contour as background context to prevent a white spatial void.
-    - Geometry/Texture Void Mitigation: Adhere strictly to the "ensemble_pair" rule. DO NOT hallucinate arbitrary forms. Focus 100% of pixel generation on "Surface Texture" and "Dynamic AO" for depth. Extract Design DNA from Front to logically place Service Doors/MEP details on blind spots.
-    - Material Injection: Lock original textures. Apply Relighting only for new solar angle.
-
-    ## Step 4: Final Execution & Compliance Check
-    - Command: Orbit the Brown Point to the target coordinate and capture the Completed Reality using the optical setup from Step 2.
-    - Compliance:
-      [ ] Original geometry preserved 100%? (No Hallucination)
-      [ ] Perspective mathematically correct? (No Distortion)
-      [ ] Blind spot logically inferred? (No Blank Spaces)
-      [ ] IMAGE 2 elevation geometry reflected in output? (No Deviation)
-
-    [GENERATE IMAGE NOW]
-    ```
-
-
----
-
-## **PHASE 4. SYNTHESIS & GENERATION (통합 프롬프트 조립 및 최종 이미지 생성)**
-PHASE 2(건축 설계 진실)와 PHASE 3(5-IVSP 시점 제어)의 출력물을 포함한 **단일 결정론적 최종 프롬프트**를 조립하고 이미지를 생성하는 확정 실행 단계.
-
-1.  **Integration Validation (통합 검증 및 Phase 4 Fail 루프 브레이커)**:
-    *   **Phase 4 Pre-flight 검증 (사전 검사)**:
-        *   PHASE 2 산출물 `ensemble_pair` 성립 여부 재확인: `1_Geometry_Data_MASTER` + `2_Property_Data_SLAVE` 모두 존재할 때만 진행.
-        *   PHASE 3 5-IVSP Coordinate Anchoring 결과(Azimuth/Altitude/렌즈 수치) 유효성 확인.
-        *   **양손역부족 시 실행 차단**: 파일이 없거나 속성이 누락되면 환각을 막기 위해 렌더링 자체를 차단하고 콘솔에 `[PROTOCOL-FAIL]`을 출력합니다. (단방향 추론 원칙에 따라 이전 Phase를 임의 호출하지 않고 현 지점에서 멈춤)
-    *   **Phase 4 Post-flight 검증 (사후 검사)**:
-        *   생성이 완료되었을 때 AI가 반환한 이미지가 유효하지 않다면 즉시 `[PROTOCOL-FAIL]`을 출력하고 캔버스에 깨진 액셀을 올리지 않고 버립니다. (해당 Phase 4만 재추론 시도)
-2.  **Unified Prompt Assembly (3레이어 통합 프롬프트 조립)**:
-
-| 레이어 | 데이터 소스 | 렌더링 역할 |
-|---|---|---|
-| **Layer A (형태 고정)** | PHASE 2 `1_Geometry_Data_MASTER` | ControlNet Image Prompt, 가중치 1.0 |
-| **Layer B (시점 주입)** | PHASE 3 5-IVSP Phase 1/2 결과 + **`analyzedOpticalParams`(V₀)** | template.md Pre-Step + Step 1~2 변수 주입 |
-| **Layer C (물성 주입)** | PHASE 2 `2_Property_Data_SLAVE` + PHASE 3 Material Injection | template.md Step 3~4 변수 주입 |
-
-    *   **통합 우선순위 규칙**: 형태(Geometry)는 항상 최종 결정권(MASTER). 시점은 5-IVSP Phase 1 GPS 좌표가 절대적으로 우선. 물성은 PHASE 2 분석값이 PHASE 3 Relighting 전에 고정.
-    *   **모체 기반 시점 변경 로직**: 시점 변경은 단순히 모체를 추적하는 것이 아니라, **"모체에서 시점 변경을 진행"**하는 방식으로 작동됨.
-    *   **상수 및 변수 분리 참조**: 프롬프트 조립 시 **상수는 "이미지 분석 결과"**(`analyzedOpticalParams`, `elevationParams` 등 모체에서 추출된 불변값)이며, **변수는 "시점 분석 결과"**(사용자가 새로 설정한 뷰포인트 각도, 고도 등)로 엄격히 구분하여 참조함.
-    *   **[V73] Layer B Pre-Step — V₀ 실제 좌표 주입 (카메라 이동 벡터 Δ 계산)**:
-        *   `analyzedOpticalParams` (PHASE 1에서 AI가 역산한 원본 카메라 위치)를 V₀로 프롬프트에 명시적으로 주입.
-        *   사용자가 슬라이더로 설정한 값이 V₁(목표 시점)이며, AI는 V₀→V₁ 이동 벡터(Δ)를 계산하여 정밀한 카메라 궤도 경로를 실행.
-        *   **주입 포맷**: `V₀: Angle ${v0_angle} | Altitude ${v0_altitude} | Lens ${v0_lens}` / `Δ: ${v0_angle} → ${currentAngle}`
-    *   **[V159] VERIFIED ANCHOR 주입**:
-        *   PHASE 2의 `runTriValidation`에서 검증된 `triValidationAnchor` 객체(06:00 정면 확인 및 V₀ 앵커)를 Layer B 프롬프트 상단에 주입.
-        *   AI가 임의로 기점을 왜곡하지 못하도록 캘리브레이션 컨텍스트로 제공.
-
-3.  **Final Image Generation (AI 렌더링 실행)**:
-    *   **Engine:** `gemini-3.1-flash-image-preview` (MODEL_IMAGE_GEN)
-    *   Layer A(Geometry MASTER) + Layer B(5-IVSP 시점) + Layer C(Property SLAVE) 통합 패키지를 AI 엔진에 전송.
-    *   원본 이미지(Reference)와 5면 참조 시트(`architecturalSheetImage`) 동시 제공.
-    *   **Compliance Check**:
-        *   [ ] 원본 형태 100% 보존? (No Hallucination)
-        *   [ ] 퍼스펙티브 수학적 정확성? (No Distortion)
-        *   [ ] 비가시권 논리적 완성? (No Blank Spaces)
-        *   [ ] **정면(06:00) 방위 보존?** (Primary_Facade 기준 유지, No Reorientation)
-
-
-4.  **Result Projection (결과 출력 및 캔버스 주입)**:
-    *   생성된 이미지를 `simulationViewpoint` 상태에 저장.
-    *   코드 시도 영역에 원본 이미지 우측에 새 `CanvasItem`으로 주입. 선택 자동 활성화.
-    *   **[UI Logic — Label Visibility & Padding (V136/V137)]**:
-        *   **Visibility**: 캔버스 줌 배율이 **20% 이하**일 경우, 가독성을 위해 이미지 하단 라벨을 자동으로 숨김 처리.
-        *   **Padding**: 이미지 하단 에지와 라벨 사이의 간격은 줌 배율과 관계없이 시각적으로 **항상 12px**가 유지되도록 인라인 트랜스폼(`1/zoom` 스케일링) 및 `paddingTop`을 싱크.
-    *   **[V161] 생성 이미지의 상속 분리 및 고유 앙상블 페어(ensemble_pair) 갱신**:
-        *   생성된 파생 이미지는 단순히 원본의 광학 상태(V0)를 물려받는 것이 아니라, **자신이 새로 부여받은 뷰포인트 좌표(Angle, Altitude, Lens 등)**를 자체적인 Optical Parameter로 갱신하여 안착시킴.
-        *   불변의 상수인 건축 정보(AEPL)와 새롭게 갱신된 광학 정보가 합쳐진 자신만의 완전한 `ensemble_pair`를 라이브러리 아트보드(정보 뷰어)에 출력하여 데이터 모순을 차단함.
-    *   다운로드 버튼 활성화 (`simulation.png`).
-
----
-
-## **[부록] PHASE별 FAIL 발동 조건 세부 정의 (V154 기준)**
-
-단방향 추론 (One-Way Inference) 원칙 하에, 시스템이 비정상 상태(Hallucination, 데이터 빙결, 정보 붕괴)를 감지하고 즉시 각 페이즈 단위로 렌더링을 멈추거나 재추론(Retry)을 시도해야 하는 **절대적 기준(FAIL 트리거)**입니다.
-
-### 1. PHASE 2 (Architectural Inference) FAIL 조건
-*   **재생성 이미지와 입면 정보(JSON) 불일치**: `gemini-3.1-flash-image-preview`가 재생성한 배경 통제용 이미지의 형태적 뼈대와 Protocol A가 분석해서 뽑아낸 파라미터가 상호 충돌(모순)할 때. (예: 생성된 이미지는 박공 지붕이나 텍스트는 평지붕으로 판단)
-*   **06:00 정면 인식 오류**: 모델이 건축물의 주정면 모서리(Blue-Red)를 찾지 못해 시계판 방위 좌표계의 06:00 오리진(Origin) 기점을 고정하지 못했을 때.
-*   **필수 속성 유실 (AEPL 스키마 위반)**: 형태, 대지, 재질, 창호, 돌출부 등 5대 필수 JSON 파라미터 중 하나라도 빈 값이 반환되었거나 쓰레기 문자열이 감지될 때.
-
-### 2. PHASE 3 (Viewpoint Configuration) FAIL 조건
-*   **현재 원본 시점(V0) 역산 실패**: 업로드된 이미지(IMAGE 1)가 현재 어떤 각도(Angle)와 고도(Altitude)를 갖고 있는지 역산하지 못하여 초기 앵커 포인트를 상실했을 때.
-*   **사용자 입력 파라미터 매핑 오류**: 슬라이더로 입력된 시점 값(Angle 03:00 등)을 시스템이 받아들이지 못하거나, NaN/Null로 파싱되어 이동 벡터(Δ)를 계산할 수 없을 때.
-*   **거시적 대지(Context) 미동기화**: 5-IVSP 파라미터가 건축물 자체만 회전시키고, 후경/전경에 깔리는 도시 맥락(Skyline, 배경 요소)을 회전된 시차(Parallax)에 맞게 이동시키지 않는 심각한 매핑 오류가 발현될 때.
-
-### 3. PHASE 4 (Synthesis & Generation) FAIL 조건
-*   **앙상블 페어 (ensemble_pair) 붕괴**: `1_Geometry_Data_MASTER`와 `2_Property_Data_SLAVE` 둘 중 하나라도 누락되어, 형태와 재질을 결합시키는 양손역부족(Pre-flight 통합) 검증을 통과하지 못했을 때.
-*   **모체-생성물 이질화 (Geometric Deviation)**: 최종 렌더링 이미지가 PHASE 2에서 만든 십자 형태의 '5면 입면 참조 시트'의 기하학적 형태나 비율을 완전히 무시하고 환각된 형태로 도출될 때.
-*   **API/바이너리 반환 에러**: 이미지 모델 API가 타임아웃 되거나, 잘못된 base64 포맷, 빈 문자열을 반환하여 캔버스에 깨진 액셀(Dummy Base)을 생성하는 상황일 때.
-
+## **[결론 요약]**
+*   이 앱은 무거운 5-IVSP 로직을 쥐고 있는 마스터 브레인이 **아닙니다.**
+*   이 앱은 사용자의 입력(이미지, 좌표, 선)을 받아 외부 하네스 엔진에게 연산을 **'주문(Order)'** 하고, 배달된 결과물을 광활한 무한 캔버스라는 공간에 **'전시(Display)'** 하는 **시각적 프론트엔드 프로젝터(Projector)**입니다.

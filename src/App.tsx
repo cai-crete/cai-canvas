@@ -412,6 +412,14 @@ export default function App() {
     time: string;
   } | null>(null);
 
+  // V335: CHANGE VIEWPOINT 전용 분석 상태 (cv2 앱 동일 구조)
+  const [cvAnalysisReport, setCvAnalysisReport] = useState<{
+    section1: Record<string, string>;
+    section2: Record<string, string>;
+    section3: Record<string, string>;
+  } | null>(null);
+  const [cvHasAnalyzed, setCvHasAnalyzed] = useState(false);
+
   // UI State
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
@@ -442,6 +450,13 @@ export default function App() {
 
   // V265: CHANGE VIEWPOINT prompt state
   const [cvPrompt, setCvPrompt] = useState('');
+  // V335: CHANGE VIEWPOINT generate view mode
+  const [cvSelectedView, setCvSelectedView] = useState<'eyeLevel' | 'front' | 'top' | 'rightSide' | 'birdEye' | null>(null);
+  const [cvEyeLevelDirection, setCvEyeLevelDirection] = useState<'04:30' | '07:30'>('04:30');
+  const [cvFrontAltitude, setCvFrontAltitude] = useState<number>(1.6);
+  const [cvRightSideDirection, setCvRightSideDirection] = useState<'03:00' | '09:00'>('03:00');
+  const [cvRightSideAltitude, setCvRightSideAltitude] = useState<number>(1.6);
+  const [cvBirdEyeDirection, setCvBirdEyeDirection] = useState<'04:30' | '07:30'>('04:30');
 
   // V209: Sketch To Image Panel State
   const [sketchPrompt, setSketchPrompt] = useState('');
@@ -520,6 +535,10 @@ export default function App() {
       setElevationImages(null);
       // V268: Reset all panel input states on canvas deselect
       setCvPrompt('');
+      // V335: Reset CV analysis state on deselect
+      setCvAnalysisReport(null);
+      setCvHasAnalyzed(false);
+      setCvSelectedView(null);
       setSketchMode('');
       setSketchStyle(null);
       setActiveDetailStyle(null);
@@ -1927,26 +1946,204 @@ CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
   // ---
   // PHASE 4: SYNTHESIS & GENERATION (Mother App Unified Controller)
   // ---
+  // V335: CHANGE VIEWPOINT 전용 ANALYZE 핸들러 (cv2 앱 방식)
+  const handleCvAnalyze = async () => {
+    const sourceItem = selectedItemIds[0]
+      ? canvasItems.find(item => item.id === selectedItemIds[0])
+      : canvasItems.find(item => item.type === 'artboard' || item.type === 'upload');
+
+    if (!sourceItem?.src) {
+      setToastMessage('이미지를 먼저 선택해주세요.');
+      setTimeout(() => setToastMessage(''), 3000);
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisStep('이미지 분석 중...');
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      // V335: CV2 동일 방식 — 이미지 전처리 (재생성)
+      let analysisImageBase64 = sourceItem.src as string;
+      try {
+        const regenBase64Data = analysisImageBase64.split(',')[1];
+        const regenMimeType = analysisImageBase64.split(';')[0].split(':')[1];
+        const regenResult = await ai.models.generateContent({
+          model: IMAGE_GEN,
+          contents: {
+            parts: [
+              { inlineData: { data: regenBase64Data, mimeType: regenMimeType } },
+              { text: `## TASK: Image Pre-Processing\n- Action: Reproduce this architectural image exactly as-is.\n- Output: A pixel-perfect copy with identical composition, lighting, materials, and geometry.\n- Constraint: No modifications of any kind.` },
+            ],
+          },
+        });
+        if (abortControllerRef.current?.signal.aborted) return;
+        const regenParts = regenResult.candidates?.[0]?.content?.parts || [];
+        const regenImagePart = regenParts.find((p: any) => p.inlineData);
+        if (regenImagePart?.inlineData) {
+          analysisImageBase64 = `data:${regenImagePart.inlineData.mimeType};base64,${regenImagePart.inlineData.data}`;
+        }
+      } catch (regenErr) {
+        console.warn('[CV-Analyze Pre-Processing] Failed, using original:', regenErr);
+      }
+
+      if (abortControllerRef.current?.signal.aborted) return;
+
+      // V335: CV2 동일 분석 프롬프트 — #.정보분석샘플 3섹션
+      const analysisPrompt = `
+# SYSTEM: Architectural Analysis Engine (Protocol A — #.정보분석샘플)
+
+## Angle Classification Rules (Clock-Face)
+Building main facade = 06:00 (Front).
+1. Center = FRONT face-on → \`06:00\`
+2. Center = RIGHT face-on → \`3:00\`
+3. Center = LEFT face-on → \`09:00\`
+4. Center = REAR face-on → \`12:00\`
+5. Left = FRONT && Right = RIGHT → \`04:30\`
+6. Left = LEFT && Right = FRONT → \`07:30\`
+7. Left = RIGHT && Right = REAR → \`1:30\`
+8. Left = REAR && Right = LEFT → \`10:30\`
+
+## Output Format
+Return ALL fields as valid JSON:
+
+\`\`\`json
+{
+  "visual_reasoning": "Identify visible facades, then match to angle rule.",
+  "angle": "One of: 12:00, 1:30, 3:00, 04:30, 06:00, 07:30, 09:00, 10:30",
+  "section1_optical": {
+    "viewpoint": "Camera viewpoint description",
+    "azimuth": "Direction in clock-face format",
+    "altitude": "Estimated camera altitude",
+    "perspective": "Perspective type",
+    "sensor": "Estimated sensor format",
+    "focal_length": "Estimated focal length",
+    "lighting": "Lighting & weather",
+    "contrast": "Contrast level"
+  },
+  "section2_geometric": {
+    "skin": "Facade system",
+    "inner": "Inner facade",
+    "outer": "Outer facade",
+    "mass": "Basic mass",
+    "base_1f": "Ground floor",
+    "mid_body": "Mid-level",
+    "roof": "Roof"
+  },
+  "section3_conceptual": {
+    "design_algorithm": "Design methodology",
+    "color_palette": "Primary color palette",
+    "form_motif": "Form motif",
+    "form_contrast": "Form contrast",
+    "mood_contrast": "Mood contrast"
+  }
+}
+\`\`\`
+      `;
+
+      const base64Data = analysisImageBase64.split(',')[1];
+      const mimeType = analysisImageBase64.split(';')[0].split(':')[1];
+
+      const runCvAnalysis = async (modelName: string) => {
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              { inlineData: { data: base64Data, mimeType: mimeType } },
+              { text: analysisPrompt },
+            ],
+          },
+        });
+        if (abortControllerRef.current?.signal.aborted) return false;
+
+        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const jsonStr = responseText.match(/\{[\s\S]*\}/)?.[0];
+        if (!jsonStr) throw new Error("No JSON returned from model");
+
+        const data = JSON.parse(jsonStr);
+
+        // 분석 결과 저장
+        const newAnalyzedOpt = {
+          angle: data.angle || '06:00',
+          altitude: data.section1_optical?.altitude || 'N/A',
+          lens: data.section1_optical?.focal_length || 'N/A',
+          time: TIMES[timeIndex],
+        };
+        setAnalyzedOpticalParams(newAnalyzedOpt);
+
+        const newReport = {
+          section1: data.section1_optical || {},
+          section2: data.section2_geometric || {},
+          section3: data.section3_conceptual || {},
+        };
+        setCvAnalysisReport(newReport);
+        setCvHasAnalyzed(true);
+
+        // 캔버스 아이템에도 저장
+        setCanvasItems(prev => prev.map(item => {
+          if (item.id === sourceItem.id) {
+            return {
+              ...item,
+              label: 'IMAGE / VIEW',
+              parameters: {
+                ...(item.parameters || { angleIndex, altitudeIndex, lensIndex, timeIndex }),
+                analyzedOpticalParams: newAnalyzedOpt,
+              }
+            };
+          }
+          return item;
+        }));
+
+        console.log('[V335 CV-Analyze] 분석 완료:', newReport);
+        return true;
+      };
+
+      try {
+        await runCvAnalysis(ANALYSIS);
+      } catch (primaryError) {
+        console.warn(`CV Analyze primary model failed, retrying fallback...`, primaryError);
+        const success = await runCvAnalysis(ANALYSIS_FALLBACK);
+        if (!success) throw new Error("Fallback failed");
+      }
+
+    } catch (err) {
+      if (abortControllerRef.current?.signal.aborted) return;
+      console.warn("CV Analysis failed:", err);
+      alert("분석 API 호출이 실패하거나 할당량(Quota)을 초과했습니다.");
+    } finally {
+      if (!abortControllerRef.current?.signal.aborted) {
+        setIsAnalyzing(false);
+        setAnalysisStep('');
+      }
+    }
+  };
+
   const handleGenerate = async () => {
     // 0. FUNCTION MULTIPLEXER
     if (selectedFunction === 'CHANGE VIEWPOINT') {
-      // V257: Accept artboard/upload/generated as source
+      // V335: CV2 방식 Generate — cvAnalysisReport를 컨텍스트로 사용
       const sourceItem = selectedItemIds[0]
         ? canvasItems.find(item => item.id === selectedItemIds[0])
         : canvasItems.find(item => item.type === 'artboard' || item.type === 'upload');
 
       if (!sourceItem || !sourceItem.src) {
-        alert("아트보드에 이미지를 먼저 업로드하세요.");
+        alert("이미지를 먼저 선택해주세요.");
         return;
       }
 
-      // --- V153: PHASE 3 검증 (Viewpoint Configuration Validation) ---
-      const isValidPhase3 = ANGLES[angleIndex] && ALTITUDES[altitudeIndex] && LENSES[lensIndex] && TIMES[timeIndex];
-      if (!isValidPhase3) {
-        console.error('[PROTOCOL-FAIL] Phase 3 검증 실패: 유효하지 않은 5-IVSP 시점 파라미터가 감지되어 재추론을 시도합니다.');
+      if (!cvSelectedView) {
+        alert("뷰 타입을 선택해주세요 (아이레벨뷰 / 정면뷰 / 탑뷰 / 측면뷰 / 조감뷰).");
         return;
       }
-      console.log('[PROTOCOL-PASS] Phase 3 검증 통과: 5-IVSP 파라미터 셋업 유효함');
+
+      // 분석 리포트가 없으면 경고
+      if (!cvHasAnalyzed) {
+        alert("먼저 ANALYZE 버튼을 클릭하여 이미지를 분석해주세요.");
+        return;
+      }
 
       const hasInitialViews = canvasItems.some(i => i.type === 'generated' && (i.motherId === sourceItem.id || (i.motherId === undefined && i.id === sourceItem.id)));
       const isFirstTime = (sourceItem.type === 'upload' || sourceItem.type === 'artboard') && !hasInitialViews;
@@ -1958,202 +2155,217 @@ CONSTRAINTS: NO text, NO labels, Pure Transparent Background (Alpha).
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-        // V257: C-7~C-9 — inline V128 regen if first time (no elevationParams on item)
-        let localElevationParams: any = sourceItem.parameters?.elevationParams || elevationParams;
-        let localElevationImages: any = sourceItem.parameters?.elevationImages || elevationImages;
-        let localAnalyzedOpt: any = sourceItem.parameters?.analyzedOpticalParams || analyzedOpticalParams;
-        const localBuildingDescription: string = sourceItem.parameters?.buildingDescription || ''; // V297 G-1
-
-        if (!localElevationParams) {
-          console.log('[V257] No elevationParams found — running V128 regen pipeline...');
-          const activeSrc = sourceItem.src as string;
-          // V297 D-6: inline 경로도 묘사 선행 호출
-          const inlineDesc = await getArchitecturalDescription(activeSrc);
-          const analysisResult = await analyzeViewpoint(activeSrc, sourceItem.id, inlineDesc);
-          if (!analysisResult) {
-            setIsGenerating(false);
-            return;
-          }
-          localElevationParams = analysisResult.elevationParameters;
-          localElevationImages = analysisResult.elevationImages;
-          localAnalyzedOpt = analysisResult.analyzedOpt;
-        }
-
-        const v0_angle = localAnalyzedOpt?.angle || 'Unknown';
-        const v0_altitude = localAnalyzedOpt?.altitude || 'Unknown';
-        const v0_lens = localAnalyzedOpt?.lens || 'Unknown';
-        const v0_time = localAnalyzedOpt?.time || 'Unknown';
-
-        const getAngle = (base: string) => {
-          if (['07:30', '09:00', '10:30'].includes(base)) return '07:30';
-          return '04:30';
-        };
-
-        const getSemanticAngle = (base: string) => {
-          switch (base) {
-            case '06:00': return '06:00 (Direct Front / Primary Facade View)';
-            case '04:30': return '04:30 (Front-Right Corner View / 2-Point Perspective)';
-            case '3:00': return '3:00 (Direct Right Side / Profile View)'; // V297 B
-            case '1:30': return '1:30 (Rear-Right Corner View / 2-Point Perspective)'; // V297 B
-            case '12:00': return '12:00 (Direct Rear / Complete Back View)';
-            case '10:30': return '10:30 (Rear-Left Corner View / 2-Point Perspective)';
-            case '09:00': return '09:00 (Direct Left Side / Profile View)';
-            case '07:30': return '07:30 (Front-Left Corner View / 2-Point Perspective)';
-            default: return base;
-          }
-        };
-        const viewsToGenerate = [{
-          name: "Custom View",
-          angle: ANGLES[angleIndex],
-          altitude: ALTITUDES[altitudeIndex].label,
-          lens: LENSES[lensIndex].label,
-          distance: "Standard",
-          scenario: determineScenario(ANGLES[angleIndex], ALTITUDES[altitudeIndex].value, LENSES[lensIndex].value),
-        }];
-
+        // V335: 소스 이미지 결정
         let actualImageSrc = sourceItem.src;
         if (sourceItem.type === 'generated' && sourceItem.motherId) {
           const motherItem = canvasItems.find(i => i.id === sourceItem.motherId);
           if (motherItem) actualImageSrc = motherItem.src;
         }
-
         const base64Data = (actualImageSrc as string).split(',')[1];
         const mimeType = (actualImageSrc as string).split(';')[0].split(':')[1];
 
-        const generatePromises = viewsToGenerate.map(async (viewConfig) => {
-          const currentTime = TIMES[timeIndex];
-          const layerB_viewpoint = `
-# ACTION PROTOCOL (MANDATORY EXECUTION WORKFLOW)
-## Pre-Step: Reality Anchoring & Camera Delta Calculation
-- V₀ (Current Camera Position): Angle: ${v0_angle} o'clock | Altitude: ${v0_altitude} | Lens: ${v0_lens} | Time: ${v0_time}
-- V₁ (Target Camera Position): Angle: ${getSemanticAngle(viewConfig.angle)} | Altitude: ${viewConfig.altitude} | Lens: ${viewConfig.lens} | Time: ${currentTime}
-- Δ Movement Vector: Orbit from ${v0_angle} → ${viewConfig.angle}
-- Target Vector: ${getSemanticAngle(viewConfig.angle)}
-## Step 2: Scenario Mapping & Optical Engineering
-- Scenario: ${viewConfig.scenario} | Lens: ${viewConfig.lens} | Time of Day: ${currentTime}`;
+        // V335: cvAnalysisReport를 cv2 방식으로 컨텍스트 블록 구성
+        const buildAnalysisContext = () => {
+          if (!cvAnalysisReport) return '## ANALYSIS CONTEXT\n(No analysis data — infer from source image.)';
+          const s1 = cvAnalysisReport.section1 || {};
+          const s2 = cvAnalysisReport.section2 || {};
+          const s3 = cvAnalysisReport.section3 || {};
+          return `## ANALYSIS CONTEXT (From Phase 1 — #.정보분석샘플)
 
-          const layerC_property = localElevationParams ? `
-## Step 5: Structural & Material Parameters (PHASE 2 AEPL Data — Immutable)
-- Mass Typology: ${localElevationParams['1_Geometry_MASTER']?.mass_typology || 'N/A'}
-- Roof Form: ${localElevationParams['1_Geometry_MASTER']?.roof_form || 'N/A'}
-- Base Material: ${localElevationParams['2_Property_SLAVE']?.base_material_type || 'N/A'}
-- Fenestration: ${localElevationParams['2_Property_SLAVE']?.fenestration_type || 'N/A'}` : ''; // V297 A: AEPL v4 키 통일
+### 섹션 1. 광학 및 시점 파라미터 (Optical & Viewpoint Data)
+| 변수 (Variable) | 구조화 데이터 (Value) |
+| :--- | :--- |
+| **촬영 시점 (Viewpoint)** | ${s1.viewpoint || 'N/A'} |
+| **방위각 (Azimuth)** | ${s1.azimuth || 'N/A'} |
+| **촬영 고도 (Altitude)** | ${s1.altitude || 'N/A'} |
+| **투시 왜곡 (Perspective)** | ${s1.perspective || 'N/A'} |
+| **센서 포맷 (Sensor)** | ${s1.sensor || 'N/A'} |
+| **초점 거리 (Focal Length)** | ${s1.focal_length || 'N/A'} |
+| **광원 및 날씨 (Lighting)** | ${s1.lighting || 'N/A'} |
+| **대비 강도 (Contrast)** | ${s1.contrast || 'N/A'} |
 
-          // V297 G-2: MICRO-DESCRIPTION 블록 (Phase 0 묘사 → Phase 4 주입)
-          const layerC_microDesc = localBuildingDescription
-            ? `\n## Step 6: Original Image Micro-Description (Immutable Reference)\n[ORIGINAL IMAGE MICRO-DESCRIPTION]\n${localBuildingDescription}`
-            : '';
+### 섹션 2. 기하학 및 공간 구조 명세 (Geometric & Spatial Specifications)
+| 시스템 분류 | 구조 및 형태 사양 |
+| :--- | :--- |
+| **외피 시스템 (Skin)** | ${s2.skin || 'N/A'} |
+| **내부 파사드 (Inner)** | ${s2.inner || 'N/A'} |
+| **외부 파사드 (Outer)** | ${s2.outer || 'N/A'} |
+| **기본 매스 (Mass)** | ${s2.mass || 'N/A'} |
+| **하층부 (1F Base)** | ${s2.base_1f || 'N/A'} |
+| **중층부 (Mid Body)** | ${s2.mid_body || 'N/A'} |
+| **상층부 (Roof)** | ${s2.roof || 'N/A'} |
 
-          // V297 G-3: De-bake 그림자 분리 + 태양광 재계산 강령 추가
-          const layerC_blindspot = `## Step 3: Layering & Blind Spot Inference (Void Mitigation)
-- Context Void Mitigation: Synchronize Foreground/Background.
-- Material Injection: Lock original textures. Relighting only for solar angle (${currentTime}).
-- Shadow De-bake: Dark regions in source = CAST SHADOWS (not paint/texture).
-  Do NOT copy shadow patterns to new surfaces.
-  Re-cast shadows from sun position at ${currentTime}.`;
+### 섹션 3. 개념 및 시각적 속성 (Conceptual & Visual Attributes)
+| 속성 분류 | 데이터 지표 |
+| :--- | :--- |
+| **디자인 알고리즘** | ${s3.design_algorithm || 'N/A'} |
+| **주조색 (Color Palette)** | ${s3.color_palette || 'N/A'} |
+| **형태 모티브 (Motif)** | ${s3.form_motif || 'N/A'} |
+| **형태적 대비 (Form)** | ${s3.form_contrast || 'N/A'} |
+| **감성적 대비 (Mood)** | ${s3.mood_contrast || 'N/A'} |`;
+        };
+        const analysisContext = buildAnalysisContext();
+        const additionalDirection = cvPrompt.trim() ? `\n\n## Additional Creative Direction\n${cvPrompt.trim()}` : '';
 
-          let activeElevationSlots = getElevationSlot(viewConfig.angle);
-          if (activeElevationSlots.length === 0) activeElevationSlots = getElevationSlot("06:00");
-          const elevationLabel = activeElevationSlots.map(s => s.label).join('+');
+        // V335: cvSelectedView에 따라 cv2 앱과 동일한 프롬프트 구성
+        let finalPrompt = '';
+        if (cvSelectedView === 'eyeLevel') {
+          finalPrompt = `# GOAL
+* Generate a precise "Eye-Level Corner View" of the architecture presented in the source image.
+* Treat the building in the image as a completed, constructed reality.
+* Change the angle of view to this specific new perspective without altering the building's original geometry, materials, or style.
 
-          // V297 G-4: 권한 분리 룰 + MICRO-DESCRIPTION 블록 추가
-          const finalPrompt = `
-# SYSTEM: 5-Point Integrated Viewpoint Simulation Architect (5-IVSP)
-# GOAL: Change the angle of view of the provided architectural image.
-- Geometric Sanctuary: The building's proportions are Immutable Constants.
-# INPUT IMAGES: IMAGE 1 (Primary) + IMAGE 2 (Geometric Reference: ${elevationLabel})
-# IMAGE AUTHORITY RULE:
-  - IMAGE 1 (Original): ABSOLUTE TRUTH for materials, textures, colors, and style.
-  - IMAGE 2 (Elevation): GEOMETRY GUIDE ONLY — silhouette and proportions reference, NOT color/material source.
-${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}${cvPrompt.trim() ? `\n\n## Additional Creative Direction\n${cvPrompt.trim()}` : ''}
-[GENERATE IMAGE NOW]`.trim();
+## Camera Settings for This Render
+* **View Direction**: ${cvEyeLevelDirection} (${cvEyeLevelDirection === '04:30' ? 'Front-Right Corner' : 'Front-Left Corner'})
+* **Altitude**: 1.6m (Eye Level)
+* **Lens**: 24-32mm (Wide Tilt-Shift)
+* **Perspective**: 2-Point Perspective
+* **Camera**: Sony A7R V | Lens: Canon TS-E 24mm f/3.5L II
 
-          const runGen = async (modelName: string) => {
-            const parts: any[] = [{ inlineData: { data: base64Data, mimeType: mimeType } }];
-            if (localElevationImages) {
-              for (const slot of activeElevationSlots) {
-                const imgData = (localElevationImages as any)[slot.label.toLowerCase()];
-                if (imgData) parts.push({ inlineData: { data: imgData.split(',')[1], mimeType: 'image/png' } });
-              }
-            }
-            parts.push({ text: finalPrompt });
-            const response = await ai.models.generateContent({ model: modelName, contents: { parts }, config: { temperature: 0.1, topK: 1 } }); // V297 G-5
-            if (abortControllerRef.current?.signal.aborted) return false;
+${analysisContext}${additionalDirection}
 
-            if (response.candidates?.[0]?.content?.parts) {
-              for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData) {
-                  const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                  await new Promise<void>((resolve) => {
-                    const img = new Image();
-                    img.onload = () => {
-                      const updatedOpticalParams = { angle: ANGLES[angleIndex], altitude: ALTITUDES[altitudeIndex].label, lens: LENSES[lensIndex].label, time: TIMES[timeIndex] };
-                      // V272 F-2: VIEWPOINT label 자동 증가
-                      // V309: VIEW XX 넘버링 (모체 독립적)
-                      const vpCount = canvasItems.filter((ci: CanvasItem) => ci.motherId === sourceItem.id && ci.label?.startsWith('VIEW ')).length + 1;
-                      const newGenItem: CanvasItem = {
-                        id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                        type: 'generated',
-                        src: generatedSrc,
-                        x: 0, y: sourceItem.y,
-                        width: img.width * 0.3, height: img.height * 0.3,
-                        // V283 D: VIEWPOINT 01 연결선이 ANALYZED 모체에 직접 연결되도록
-                        motherId: sourceItem.id,
-                        label: `VIEW ${String(vpCount).padStart(2, '0')}`,  // V284 E
-                        parameters: {
-                          angleIndex, altitudeIndex, lensIndex, timeIndex,
-                          analyzedOpticalParams: updatedOpticalParams,
-                          elevationParams: localElevationParams, sitePlanImage, elevationImages: localElevationImages,
-                          cvPrompt  // V268
-                        }
-                      };
-                      
-                      // V2.6.0: Save to local folder
-                      saveImageToLocal(generatedSrc, 'viewpoint');
-                      
-                      saveHistoryState();
-                      setCanvasItems(prev => {
-                        // V283 D: siblings 필터 단순화 — sourceItem.id 직접 참조
-                        const siblings = prev.filter((i: CanvasItem) => i.type === 'generated' && i.motherId === sourceItem.id);
-                        if (siblings.length === 0) {
-                          newGenItem.x = sourceItem.x + sourceItem.width + 120;
-                          newGenItem.y = (sourceItem.y + sourceItem.height * 0.25) - newGenItem.height;
-                        } else {
-                          const bottomMost = siblings.reduce((p, c) => (c.y + c.height > p.y + p.height) ? c : p, siblings[0]);
-                          newGenItem.x = bottomMost.x;
-                          newGenItem.y = bottomMost.y + bottomMost.height + 96;
-                        }
-                        // V280: CHANGE VIEWPOINT 생성 후 모체 라벨을 ANALYZED로 덮어씌움
-                        return [...prev.map(i => i.id === sourceItem.id ? { ...i, label: 'IMAGE / VIEW' } : i), newGenItem];
-                      });
-                      if (!isFirstTime) setActiveTab('result');
-                      resolve();
+[GENERATE IMAGE NOW]`;
+        } else if (cvSelectedView === 'front') {
+          finalPrompt = `# GOAL
+* Generate a precise "Front Elevation View" of the architecture presented in the source image.
+* Change the angle of view to a perfectly flat, perspective-corrected front facade without altering geometry or materials.
+
+## Camera Settings for This Render
+* **View Direction**: 06:00 (Direct Front)
+* **Altitude**: ${cvFrontAltitude}m
+* **Lens**: 50mm (Standard Tilt-Shift)
+* **Perspective**: 1-Point Perspective
+* **Camera**: Sony A7R V | Lens: Canon TS-E 50mm f/2.8L MACRO
+
+${analysisContext}${additionalDirection}
+
+[GENERATE IMAGE NOW]`;
+        } else if (cvSelectedView === 'top') {
+          finalPrompt = `# GOAL
+* Generate a precise "Orthographic TOP View" of the architecture presented in the source image.
+* Create a perfectly flat, non-perspective, two-dimensional image of the building's roof plan view.
+
+## Camera Settings for This Render
+* **View Direction**: 06:00 (Nadir / Straight Down)
+* **Altitude**: 300m
+* **Lens**: 24mm
+* **Perspective**: Orthographic Projection (True Top-Down)
+* **Camera**: DJI Mavic 3 Pro Cine (Drone)
+
+${analysisContext}${additionalDirection}
+
+[GENERATE IMAGE NOW]`;
+        } else if (cvSelectedView === 'rightSide') {
+          finalPrompt = `# GOAL
+* Generate a precise "Side Elevation View" of the architecture presented in the source image.
+* ${cvRightSideDirection === '03:00' ? 'RIGHT SIDE VIEW (03:00)' : 'LEFT SIDE VIEW (09:00)'} — Distortion-free elevation.
+
+## Camera Settings for This Render
+* **View Direction**: ${cvRightSideDirection} (${cvRightSideDirection === '03:00' ? 'Right Side Elevation' : 'Left Side Elevation'})
+* **Altitude**: ${cvRightSideAltitude}m
+* **Lens**: 50mm (Standard Tilt-Shift)
+* **Perspective**: 1-Point Perspective (Side)
+* **Camera**: Sony A7R V | Lens: Canon TS-E 50mm f/2.8L MACRO
+
+${analysisContext}${additionalDirection}
+
+[GENERATE IMAGE NOW]`;
+        } else if (cvSelectedView === 'birdEye') {
+          finalPrompt = `# GOAL
+* Generate a precise "Bird's-eye Perspective View" of the architecture presented in the source image.
+* High-altitude drone perspective with a natural sense of depth and scale.
+
+## Camera Settings for This Render
+* **View Direction**: ${cvBirdEyeDirection} (${cvBirdEyeDirection === '04:30' ? 'Front-Right' : 'Front-Left'})
+* **Altitude**: High Drone Altitude (45–60° Downward Angle)
+* **Lens**: 24mm (Wide-angle Hasselblad)
+* **Perspective**: Two-Point Perspective (Bird's-eye)
+* **Camera**: DJI Mavic 3 Pro Cine (Drone)
+
+${analysisContext}${additionalDirection}
+
+[GENERATE IMAGE NOW]`;
+        }
+
+        const runGen = async (modelName: string) => {
+          const parts: any[] = [
+            { inlineData: { data: base64Data, mimeType: mimeType } },
+            { text: finalPrompt },
+          ];
+          const response = await ai.models.generateContent({ model: modelName, contents: { parts } });
+          if (abortControllerRef.current?.signal.aborted) return false;
+
+          if (response.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+              if (part.inlineData) {
+                const generatedSrc = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                await new Promise<void>((resolve) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    const updatedOpticalParams = {
+                      angle: analyzedOpticalParams?.angle || '06:00',
+                      altitude: analyzedOpticalParams?.altitude || 'N/A',
+                      lens: analyzedOpticalParams?.lens || 'N/A',
+                      time: TIMES[timeIndex],
                     };
-                    img.src = generatedSrc;
-                  });
-                  return true;
-                }
+                    const vpCount = canvasItems.filter((ci: CanvasItem) => ci.motherId === sourceItem.id && ci.label?.startsWith('VIEW ')).length + 1;
+                    const newGenItem: CanvasItem = {
+                      id: `gen-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                      type: 'generated',
+                      src: generatedSrc,
+                      x: 0, y: sourceItem.y,
+                      width: img.width * 0.3, height: img.height * 0.3,
+                      motherId: sourceItem.id,
+                      label: `VIEW ${String(vpCount).padStart(2, '0')}`,
+                      parameters: {
+                        angleIndex, altitudeIndex, lensIndex, timeIndex,
+                        analyzedOpticalParams: updatedOpticalParams,
+                        cvPrompt,
+                        elevationParams: null,
+                        sitePlanImage: null,
+                        elevationImages: null,
+                      }
+                    };
+                    saveImageToLocal(generatedSrc, 'viewpoint');
+                    saveHistoryState();
+                    setCanvasItems(prev => {
+                      const siblings = prev.filter((i: CanvasItem) => i.type === 'generated' && i.motherId === sourceItem.id);
+                      if (siblings.length === 0) {
+                        newGenItem.x = sourceItem.x + sourceItem.width + 120;
+                        newGenItem.y = (sourceItem.y + sourceItem.height * 0.25) - newGenItem.height;
+                      } else {
+                        const bottomMost = siblings.reduce((p, c) => (c.y + c.height > p.y + p.height) ? c : p, siblings[0]);
+                        newGenItem.x = bottomMost.x;
+                        newGenItem.y = bottomMost.y + bottomMost.height + 96;
+                      }
+                      return [...prev.map(i => i.id === sourceItem.id ? { ...i, label: 'IMAGE / VIEW' } : i), newGenItem];
+                    });
+                    if (!isFirstTime) setActiveTab('result');
+                    resolve();
+                  };
+                  img.src = generatedSrc;
+                });
+                return true;
               }
             }
-            return false;
-          };
-
-          try {
-            const success = await runGen(IMAGE_GEN);
-            if (!success) throw new Error("Fallback needed");
-          } catch (e) {
-            await runGen(IMAGE_GEN_FALLBACK).catch(err => console.error("Generation failed", err));
           }
-        });
-        await Promise.all(generatePromises);
+          return false;
+        };
+
+        try {
+          const success = await runGen(IMAGE_GEN);
+          if (!success) throw new Error("Fallback needed");
+        } catch (e) {
+          await runGen(IMAGE_GEN_FALLBACK).catch(err => console.error("Generation failed", err));
+        }
+
       } catch (error) {
         if (abortControllerRef.current?.signal.aborted) return;
-        console.error("Generation Error:", error);
+        console.error("CV Generation Error:", error);
         alert("An error occurred during generation.");
       } finally {
         setIsGenerating(false);
         abortControllerRef.current = null;
-        // V268: Reset CHANGE VIEWPOINT panel after generation
         setCvPrompt('');
         setSelectedItemIds([]);
       }
@@ -3979,30 +4191,27 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                         }
                       }
                       if (fn === 'CHANGE VIEWPOINT') {
+                        // V335: 이미지만 선택하면 패널 열림 (IMAGE TO ELEVATION 종속성 완전 제거)
                         if (!sourceItem?.src) {
                           setToastMessage('이미지를 먼저 선택해주세요.');
                           setTimeout(() => setToastMessage(''), 3000);
                           return;
                         }
-                        // V304: PHASE 3 전담 — 기존 분석 파라미터 복원만 수행 (handleAnalyze 제거)
+                        // V335: 패널 열기 — 분석 결과가 이미 있다면 복원, 없으면 ANALYZE 버튼으로 시작
+                        setSelectedFunction(fn);
+                        setIsFunctionSelectorOpen(false);
+                        setIsRightPanelOpen(true);
+                        setCvPrompt(sourceItem.parameters?.cvPrompt || '');
+                        // 기존 분석 결과가 저장된 경우 복원
                         if (sourceItem.parameters?.analyzedOpticalParams) {
-                          setSelectedFunction(fn);
-                          setIsFunctionSelectorOpen(false);
-                          setIsRightPanelOpen(true);
                           setAnalyzedOpticalParams(sourceItem.parameters.analyzedOpticalParams);
-                          setElevationParams(sourceItem.parameters.elevationParams || null);
-                          setSitePlanImage(sourceItem.parameters.sitePlanImage || null);
-                          setElevationImages(sourceItem.parameters.elevationImages || null);
-                          setCvPrompt(sourceItem.parameters.cvPrompt || '');
-                          // V304: V0를 UI 슬라이더에 표시
-                          if (sourceItem.parameters.angleIndex !== undefined) setAngleIndex(sourceItem.parameters.angleIndex);
-                          if (sourceItem.parameters.altitudeIndex !== undefined) setAltitudeIndex(sourceItem.parameters.altitudeIndex);
-                          if (sourceItem.parameters.lensIndex !== undefined) setLensIndex(sourceItem.parameters.lensIndex);
-                          if (sourceItem.parameters.timeIndex !== undefined) setTimeIndex(sourceItem.parameters.timeIndex);
+                          setCvHasAnalyzed(true);
                         } else {
-                          // V305: 파라미터 없을 때 패널 열림 차단 (return 처리)
-                          setToastMessage('먼저 IMAGE TO ELEVATION을 실행해 분석하세요.');
-                          setTimeout(() => setToastMessage(''), 3500);
+                          // 신규 이미지 — 분석 필요 상태로 초기화
+                          setAnalyzedOpticalParams(null);
+                          setCvAnalysisReport(null);
+                          setCvHasAnalyzed(false);
+                          setCvSelectedView(null);
                         }
                         return;
                       }
@@ -4106,7 +4315,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                 </aside>
               </div>
 
-              {/* V177 CHANGE VIEWPOINT Panel */}
+              {/* V335 CHANGE VIEWPOINT Panel — ANALYZE → GENERATE 2단계 플로우 */}
               <div className={`
                 absolute inset-0 transition-all duration-500 ease-in-out
                 ${!isRightPanelOpen
@@ -4119,103 +4328,201 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                   className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10"
                 >
                   <div className="flex flex-col h-full">
-                    {/* V265: Single-page layout — Prompt + Viewpoint */}
                     <div className="flex-1 overflow-y-auto px-4 pb-4 pt-4 min-h-0 flex flex-col gap-5 custom-scrollbar">
 
-                      {/* Prompt Section */}
-                      <div className="flex flex-col gap-2">
-                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Prompt</span>
-                        <textarea
-                          value={cvPrompt}
-                          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCvPrompt(e.target.value)}
-                          placeholder="이미지 생성에 적용할 추가 지시사항을 입력하세요..."
-                          className="w-full h-[150px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
-                          onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
-                        />
-                      </div>
+                      <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Change Viewpoint</span>
 
-                      {/* Viewpoint Section */}
-                      <div>
-                        <span className="font-mono text-xs opacity-70 uppercase tracking-widest block mb-3">Viewpoint</span>
-                        <div className="flex-shrink-0 w-full aspect-square mx-auto rounded-[20px] bg-white/30 dark:bg-black/30 border border-black/5 dark:border-white/5">
-                          {(() => {
-                            const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                            const v0AngleStr = sourceItem?.parameters?.analyzedOpticalParams?.angle;
-                            const v0Index = v0AngleStr ? ANGLES.indexOf(v0AngleStr) : -1;
-                            return (
-                              <SitePlanDiagram
-                                angle={ANGLES[angleIndex]}
-                                isAnalyzing={isAnalyzing}
-                                analysisStep={analysisStep}
-                                lens={LENSES[lensIndex].value}
-                                visibleV0Index={v0Index !== -1 ? v0Index : null}
-                              />
-                            );
-                          })()}
+                      {/* STAGE 1: ANALYZE 상태 */}
+                      {!cvHasAnalyzed && !isAnalyzing && (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-8">
+                          <div className="flex flex-col items-center gap-2 opacity-40">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><circle cx="11" cy="11" r="3"/>
+                            </svg>
+                            <p className="font-mono text-xs text-center">이미지를 분석하여<br/>시점 데이터를 추출합니다.</p>
+                          </div>
+                          <p className="font-mono text-[10px] opacity-30 text-center">ANALYZE 버튼을 클릭하여 시작하세요.</p>
                         </div>
-                      </div>
+                      )}
 
-                      {/* Sliders */}
-                      <div className={`flex flex-col space-y-4 px-1 transition-opacity ${areSlidersLocked ? 'opacity-30 pointer-events-none' : ''}`}>
-                        {(() => {
-                          const sourceItem = canvasItems.find((i: CanvasItem) => i.id === selectedItemIds[0]);
-                          const v0AngleStr = sourceItem?.parameters?.analyzedOpticalParams?.angle;
-                          const v0Index = v0AngleStr ? ANGLES.indexOf(v0AngleStr) : -1;
-                          const minAngle = v0Index !== -1 ? Math.max(0, v0Index - 1) : 0;
-                          const maxAngle = v0Index !== -1 ? Math.min(ANGLES.length - 1, v0Index + 1) : ANGLES.length - 1;
+                      {/* ANALYZING 로딩 */}
+                      {isAnalyzing && (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-3 opacity-60">
+                          <Loader2 size={28} className="animate-spin" />
+                          <p className="font-mono text-xs text-center">{analysisStep || 'ANALYZING...'}</p>
+                        </div>
+                      )}
 
-                          return (
-                            <>
-                              <div>
-                                <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
-                                  <span className="opacity-70 uppercase tracking-widest">Angle</span>
-                                  <span className="font-bold">{ANGLES[angleIndex]}</span>
+                      {/* STAGE 2: 분석 완료 — 결과 표시 + 뷰 선택 */}
+                      {cvHasAnalyzed && !isAnalyzing && (
+                        <>
+                          {/* 분석 결과 요약 */}
+                          {analyzedOpticalParams && (
+                            <div className="flex flex-col gap-2">
+                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Analysis Result</span>
+                              <div className="rounded-[12px] border border-black/10 dark:border-white/10 bg-white/30 dark:bg-black/30 p-3 flex flex-col gap-1.5">
+                                <div className="flex justify-between font-mono text-[10px]">
+                                  <span className="opacity-50">Angle</span>
+                                  <span className="font-medium">{analyzedOpticalParams.angle}</span>
                                 </div>
-                                <input type="range" min={minAngle} max={maxAngle} step="1" value={angleIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAngleIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
+                                <div className="flex justify-between font-mono text-[10px]">
+                                  <span className="opacity-50">Altitude</span>
+                                  <span className="font-medium truncate max-w-[140px] text-right">{analyzedOpticalParams.altitude}</span>
+                                </div>
+                                <div className="flex justify-between font-mono text-[10px]">
+                                  <span className="opacity-50">Focal Length</span>
+                                  <span className="font-medium truncate max-w-[140px] text-right">{analyzedOpticalParams.lens}</span>
+                                </div>
+                                {cvAnalysisReport?.section1?.viewpoint && (
+                                  <div className="flex justify-between font-mono text-[10px]">
+                                    <span className="opacity-50">Viewpoint</span>
+                                    <span className="font-medium truncate max-w-[140px] text-right">{cvAnalysisReport.section1.viewpoint}</span>
+                                  </div>
+                                )}
                               </div>
-                        <div>
-                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
-                            <span className="opacity-70 uppercase tracking-widest">Altitude</span>
-                            <span className="font-bold">{ALTITUDES[altitudeIndex].label}</span>
+                              {/* Re-analyze 버튼 */}
+                              <button
+                                onClick={handleCvAnalyze}
+                                disabled={isAnalyzing || isGenerating}
+                                className="w-full h-[32px] rounded-full border border-black/10 dark:border-white/10 bg-transparent font-mono text-[10px] uppercase tracking-widest opacity-50 hover:opacity-100 transition-all disabled:cursor-not-allowed"
+                              >
+                                Re-Analyze
+                              </button>
+                            </div>
+                          )}
+
+                          {/* 뷰 타입 선택 */}
+                          <div className="flex flex-col gap-2">
+                            <span className="font-mono text-xs opacity-70 uppercase tracking-widest">View Type</span>
+                            <div className="flex flex-col gap-2">
+                              {[
+                                { key: 'eyeLevel' as const, label: 'AISLE LEVEL VIEW' },
+                                { key: 'front' as const, label: 'FRONT VIEW' },
+                                { key: 'rightSide' as const, label: 'RIGHT / LEFT VIEW' },
+                                { key: 'birdEye' as const, label: "BIRD'S EYE VIEW" },
+                                { key: 'top' as const, label: 'TOP VIEW' },
+                              ].map(({ key, label }) => (
+                                <button
+                                  key={key}
+                                  onClick={() => setCvSelectedView(prev => prev === key ? null : key)}
+                                  className={`h-[40px] w-full rounded-full font-display tracking-widest uppercase font-medium text-[13px] border border-black/10 dark:border-white/10 transition-all
+                                    ${cvSelectedView === key
+                                      ? 'bg-black dark:bg-white text-white dark:text-black'
+                                      : 'bg-transparent hover:bg-black/5 dark:hover:bg-white/5'}`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                          <input type="range" min="0" max={ALTITUDES.length - 1} step="1" value={altitudeIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAltitudeIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
-                        </div>
-                        <div>
-                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
-                            <span className="opacity-70 uppercase tracking-widest">Lens</span>
-                            <span className="font-bold">{LENSES[lensIndex].label}</span>
+
+                          {/* 뷰 세부 옵션 */}
+                          {cvSelectedView === 'eyeLevel' && (
+                            <div className="flex flex-col gap-2">
+                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
+                              <div className="flex gap-2">
+                                {(['04:30', '07:30'] as const).map(dir => (
+                                  <button key={dir} onClick={() => setCvEyeLevelDirection(dir)}
+                                    className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvEyeLevelDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                    {dir === '04:30' ? '04:30 (R)' : '07:30 (L)'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {cvSelectedView === 'front' && (
+                            <div className="flex flex-col gap-2">
+                              <div className="flex justify-between font-mono text-[10px]">
+                                <span className="opacity-50 uppercase tracking-widest">Altitude</span>
+                                <span className="font-medium">{cvFrontAltitude}m</span>
+                              </div>
+                              <input type="range" min="1" max="20" step="0.5" value={cvFrontAltitude}
+                                onChange={e => setCvFrontAltitude(Number(e.target.value))}
+                                className="w-full accent-black dark:accent-white cursor-pointer"
+                                onPointerDown={e => e.stopPropagation()} />
+                            </div>
+                          )}
+
+                          {cvSelectedView === 'rightSide' && (
+                            <div className="flex flex-col gap-2">
+                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
+                              <div className="flex gap-2">
+                                {(['03:00', '09:00'] as const).map(dir => (
+                                  <button key={dir} onClick={() => setCvRightSideDirection(dir)}
+                                    className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvRightSideDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                    {dir === '03:00' ? 'RIGHT' : 'LEFT'}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="flex justify-between font-mono text-[10px]">
+                                <span className="opacity-50 uppercase tracking-widest">Altitude</span>
+                                <span className="font-medium">{cvRightSideAltitude}m</span>
+                              </div>
+                              <input type="range" min="1" max="20" step="0.5" value={cvRightSideAltitude}
+                                onChange={e => setCvRightSideAltitude(Number(e.target.value))}
+                                className="w-full accent-black dark:accent-white cursor-pointer"
+                                onPointerDown={e => e.stopPropagation()} />
+                            </div>
+                          )}
+
+                          {cvSelectedView === 'birdEye' && (
+                            <div className="flex flex-col gap-2">
+                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
+                              <div className="flex gap-2">
+                                {(['04:30', '07:30'] as const).map(dir => (
+                                  <button key={dir} onClick={() => setCvBirdEyeDirection(dir)}
+                                    className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvBirdEyeDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                    {dir === '04:30' ? '04:30 (R)' : '07:30 (L)'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Prompt Section (분석 후에만 표시) */}
+                          <div className="flex flex-col gap-2">
+                            <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Additional Prompt</span>
+                            <textarea
+                              value={cvPrompt}
+                              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCvPrompt(e.target.value)}
+                              placeholder="추가 지시사항 (선택사항)..."
+                              className="w-full h-[80px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
+                              onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
+                            />
                           </div>
-                          <input type="range" min="0" max={LENSES.length - 1} step="1" value={lensIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLensIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
-                        </div>
-                        <div>
-                          <div className="flex justify-between font-mono text-xs leading-normal tracking-wide mb-1.5">
-                            <span className="opacity-70 uppercase tracking-widest">Time</span>
-                            <span className="font-bold">{TIMES[timeIndex]}</span>
-                          </div>
-                          <input type="range" min="0" max={TIMES.length - 1} step="1" value={timeIndex} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTimeIndex(Number(e.target.value))} className="w-full accent-black dark:accent-white cursor-pointer" />
-                        </div>
-                            </>
-                          );
-                        })()}
-                      </div>
+                        </>
+                      )}
                     </div>
 
-                    {/* V276: ANALYZE 버튼 폐기 — 항상 GENERATE 표시 */}
+                    {/* 하단 버튼: ANALYZE (초기) → GENERATE (분석 후) */}
                     <div className="px-4 pb-2 pt-2 shrink-0">
-                      <button
-                        onClick={isGenerating ? handleCancelGenerate : handleGenerate}
-                        disabled={isAnalyzing || !analyzedOpticalParams || areSlidersLocked}
-                        className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
-                      >
-                        <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
-                          {isAnalyzing
-                            ? <Loader2 size={16} className="animate-spin z-10" />
-                            : isGenerating ? 'CANCEL' : 'GENERATE'}
-                        </span>
-                      </button>
+                      {!cvHasAnalyzed ? (
+                        // ANALYZE 버튼
+                        <button
+                          onClick={isAnalyzing ? handleCancelGenerate : handleCvAnalyze}
+                          disabled={isGenerating}
+                          className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 bg-black text-white dark:bg-white dark:text-black"
+                        >
+                          <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
+                            {isAnalyzing ? <Loader2 size={16} className="animate-spin z-10" /> : 'ANALYZE'}
+                          </span>
+                        </button>
+                      ) : (
+                        // GENERATE 버튼
+                        <button
+                          onClick={isGenerating ? handleCancelGenerate : handleGenerate}
+                          disabled={isAnalyzing || !cvSelectedView}
+                          className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 enabled:bg-black enabled:text-white enabled:dark:bg-white enabled:dark:text-black"
+                        >
+                          <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
+                            {isGenerating ? 'CANCEL' : 'GENERATE'}
+                          </span>
+                        </button>
+                      )}
                     </div>
 
-                    {/* BOTTOM FOOTER - V177: Copyright only, No version marker */}
+                    {/* BOTTOM FOOTER */}
                     <div className="p-3 mt-auto shrink-0 flex flex-col items-center gap-1">
                       <p className="font-mono text-[10px] opacity-40 text-center tracking-tighter">
                         © CRETE CO.,LTD. 2026. ALL RIGHTS RESERVED.
@@ -4224,6 +4531,7 @@ ${layerB_viewpoint}\n${layerC_blindspot}\n${layerC_property}${layerC_microDesc}$
                   </div>
                 </aside>
               </div>
+
 
               {/* V209: SKETCH TO IMAGE Panel */}
               <div className={`
