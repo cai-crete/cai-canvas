@@ -31,13 +31,47 @@ export const useCanvasStore = create<CanvasState>()(
       historyStates: [],
       redoStates: [],
 
-      setCanvasItems: (items) => set((state) => ({ 
-        canvasItems: typeof items === 'function' ? items(state.canvasItems) : items 
-      })),
+      setCanvasItems: (items) => set((state) => {
+        const nextItems = typeof items === 'function' ? items(state.canvasItems) : items;
+        
+        // Deep IDB Sync: 모든 Base64 데이터를 미리 IndexedDB로 비동기 백업
+        nextItems.forEach((item) => {
+          if (item.src && item.src.startsWith('data:image')) {
+            saveImageToDB(item.id, item.src).catch(console.error);
+          }
+          if (item.editVersions) {
+            item.editVersions.forEach((v, idx) => {
+              if (v.src && v.src.startsWith('data:image')) {
+                saveImageToDB(`${item.id}_ev_${idx}`, v.src).catch(console.error);
+              }
+            });
+          }
+          if (item.parameters) {
+            if (item.parameters.sitePlanImage && item.parameters.sitePlanImage.startsWith('data:image')) {
+              saveImageToDB(`${item.id}_site`, item.parameters.sitePlanImage).catch(console.error);
+            }
+            if (item.parameters.architecturalSheetImage && item.parameters.architecturalSheetImage.startsWith('data:image')) {
+              saveImageToDB(`${item.id}_arch`, item.parameters.architecturalSheetImage).catch(console.error);
+            }
+            if (item.parameters.elevationImages) {
+              const elev = item.parameters.elevationImages;
+              if (elev.front && elev.front.startsWith('data:image')) saveImageToDB(`${item.id}_elev_front`, elev.front).catch(console.error);
+              if (elev.right && elev.right.startsWith('data:image')) saveImageToDB(`${item.id}_elev_right`, elev.right).catch(console.error);
+              if (elev.rear && elev.rear.startsWith('data:image')) saveImageToDB(`${item.id}_elev_rear`, elev.rear).catch(console.error);
+              if (elev.left && elev.left.startsWith('data:image')) saveImageToDB(`${item.id}_elev_left`, elev.left).catch(console.error);
+              if (elev.top && elev.top.startsWith('data:image')) saveImageToDB(`${item.id}_elev_top`, elev.top).catch(console.error);
+            }
+          }
+        });
+
+        return { canvasItems: nextItems };
+      }),
 
       addCanvasItem: async (item) => {
-        // Save base64 to DB immediately
-        await saveImageToDB(item.id, item.src);
+        // DB 백업은 이제 setCanvasItems 내부 인터셉터가 모두 처리하지만 명시적으로 호출 유지
+        if (item.src && item.src.startsWith('data:')) {
+          await saveImageToDB(item.id, item.src);
+        }
         
         const { canvasItems, saveHistoryState } = get();
         saveHistoryState();
@@ -45,13 +79,11 @@ export const useCanvasStore = create<CanvasState>()(
       },
 
       updateCanvasItem: async (id, updates) => {
-        // If updating src, update DB
-        if (updates.src) {
+        if (updates.src && updates.src.startsWith('data:')) {
            await saveImageToDB(id, updates.src);
         }
         
         const { canvasItems, saveHistoryState } = get();
-        // state saved unless just modifying purely visual temp stuff, but keeping it simple
         saveHistoryState();
         set({
           canvasItems: canvasItems.map((item) =>
@@ -62,6 +94,8 @@ export const useCanvasStore = create<CanvasState>()(
 
       removeCanvasItem: async (id) => {
         await deleteImageFromDB(id);
+        // Note: 관련된 서브 키(_ev_, _site 등)는 IndexedDB 자동 정리가 어려울 수 있으나
+        // 로컬스토리지 폭파는 막았으므로 IndexedDB 고아 데이터는 용량이 상대적으로 넉넉해 감내 가능
         
         const { canvasItems, saveHistoryState } = get();
         saveHistoryState();
@@ -107,13 +141,45 @@ export const useCanvasStore = create<CanvasState>()(
          const { canvasItems } = get();
          const restoredItems = await Promise.all(
            canvasItems.map(async (item) => {
-             if (!item.src) {
-                const storedSrc = await loadImageFromDB(item.id);
-                if (storedSrc) {
-                   return { ...item, src: storedSrc };
+             const restored = { ...item };
+             
+             if (!restored.src) {
+                const storedSrc = await loadImageFromDB(restored.id);
+                if (storedSrc) restored.src = storedSrc;
+             }
+             
+             if (restored.editVersions) {
+                restored.editVersions = await Promise.all(restored.editVersions.map(async (v, idx) => {
+                   if (!v.src) {
+                      const storedSrc = await loadImageFromDB(`${restored.id}_ev_${idx}`);
+                      if (storedSrc) return { ...v, src: storedSrc };
+                   }
+                   return v;
+                }));
+             }
+             
+             if (restored.parameters) {
+                restored.parameters = { ...restored.parameters };
+                if (restored.parameters.sitePlanImage === '') { // 값이 null/undefined가 아니라 명시적으로 비워진('') 경우만 복구
+                   const storedSite = await loadImageFromDB(`${restored.id}_site`);
+                   if (storedSite) restored.parameters.sitePlanImage = storedSite;
+                }
+                if (restored.parameters.architecturalSheetImage === '') {
+                   const storedArch = await loadImageFromDB(`${restored.id}_arch`);
+                   if (storedArch) restored.parameters.architecturalSheetImage = storedArch;
+                }
+                if (restored.parameters.elevationImages) {
+                   restored.parameters.elevationImages = { ...restored.parameters.elevationImages };
+                   const elev = restored.parameters.elevationImages;
+                   if (elev.front === '') elev.front = await loadImageFromDB(`${restored.id}_elev_front`);
+                   if (elev.right === '') elev.right = await loadImageFromDB(`${restored.id}_elev_right`);
+                   if (elev.rear === '') elev.rear = await loadImageFromDB(`${restored.id}_elev_rear`);
+                   if (elev.left === '') elev.left = await loadImageFromDB(`${restored.id}_elev_left`);
+                   if (elev.top === '') elev.top = await loadImageFromDB(`${restored.id}_elev_top`);
                 }
              }
-             return item;
+
+             return restored;
            })
          );
          set({ canvasItems: restoredItems });
@@ -122,24 +188,43 @@ export const useCanvasStore = create<CanvasState>()(
     {
       name: 'canvas-storage',
       partialize: (state) => ({
-        // Exclude src from localStorage to avoid performance overhead and QuotaExceededError
-        canvasItems: state.canvasItems.map((item) => ({ ...item, src: '' })),
+        // Deep Partialize: 모든 중량의 Base64 데이터를 제외하여 QuotaExceededError 원천 차단
+        canvasItems: state.canvasItems.map((item) => {
+          const stripped = { ...item, src: item.src?.startsWith('data:') ? '' : item.src };
+          
+          if (stripped.editVersions) {
+            stripped.editVersions = stripped.editVersions.map(v => ({ ...v, src: v.src?.startsWith('data:') ? '' : v.src }));
+          }
+          
+          if (stripped.parameters) {
+            stripped.parameters = { ...stripped.parameters };
+            if (stripped.parameters.sitePlanImage?.startsWith('data:')) stripped.parameters.sitePlanImage = '';
+            if (stripped.parameters.architecturalSheetImage?.startsWith('data:')) stripped.parameters.architecturalSheetImage = '';
+            if (stripped.parameters.elevationImages) {
+               stripped.parameters.elevationImages = {
+                 front: stripped.parameters.elevationImages.front?.startsWith('data:') ? '' : stripped.parameters.elevationImages.front,
+                 right: stripped.parameters.elevationImages.right?.startsWith('data:') ? '' : stripped.parameters.elevationImages.right,
+                 rear: stripped.parameters.elevationImages.rear?.startsWith('data:') ? '' : stripped.parameters.elevationImages.rear,
+                 left: stripped.parameters.elevationImages.left?.startsWith('data:') ? '' : stripped.parameters.elevationImages.left,
+                 top: stripped.parameters.elevationImages.top?.startsWith('data:') ? '' : stripped.parameters.elevationImages.top,
+               };
+            }
+          }
+          return stripped;
+        }),
         selectedItemId: state.selectedItemId,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
-          // 1회성 마이그레이션: App.tsx legacy key(crete_canvasItems) → canvas-storage
           if (state.canvasItems.length === 0) {
             try {
               const legacy = localStorage.getItem('crete_canvasItems');
               if (legacy) {
-                const parsed = JSON.parse(legacy) as CanvasItem[];
+                const parsed = JSON.parse(legacy);
                 state.setCanvasItems(parsed);
                 localStorage.removeItem('crete_canvasItems');
               }
-            } catch {
-              // 마이그레이션 실패 시 무시 — 데이터 없는 상태로 기동
-            }
+            } catch {}
           }
           // Re-load actual raw base64 data from IndexedDB
           setTimeout(() => state.loadImagesFromDB(), 0);
