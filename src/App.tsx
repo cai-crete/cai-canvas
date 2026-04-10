@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Footprints, Plus, PanelLeft, Lasso, X, Copy, Pencil, Eraser, Type, Bot, Orbit, GitBranch, Shield, Zap, Wind, Hash, History, Target, Cpu, PenTool, Box, Scale } from 'lucide-react';
+import { Upload, Moon, Sun, Loader2, Search, Hand, MousePointer2, Compass, Book, Wand2, Sparkles, Trash2, Undo, Redo, Download, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Footprints, Plus, PanelLeft, Lasso, X, Copy, Pencil, Eraser, Type, Bot, Orbit, GitBranch, Shield, Zap, Wind, Hash, History, Target, Cpu, PenTool, Box, Scale, RefreshCw } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { useCanvasStore } from './store/useCanvasStore';
 import { ANALYSIS, IMAGE_GEN, ANALYSIS_FALLBACK, IMAGE_GEN_FALLBACK } from './constants';
@@ -3665,6 +3665,23 @@ ${analysisContext}${additionalDirection}
                         {/* V294 A: IMAGE / VIEW 통합 툴바 — edit(+) 클릭 시 우측 파생 아트보드 생성 */}
                         {item.label === 'IMAGE / VIEW' ? (
                           <>
+                            {/* V338: 새로고침(재분석) 버튼 (분석 완료된 경우에만 표시) */}
+                            {cvHasAnalyzed && (
+                              <>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCvAnalyze();
+                                  }}
+                                  className="flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors rounded-full"
+                                  style={{ width: `${36 / (canvasZoom / 100)}px`, height: `${36 / (canvasZoom / 100)}px` }}
+                                  title="재분석"
+                                >
+                                  <RefreshCw size={12 / (canvasZoom / 100)} />
+                                </button>
+                                <div className="w-[1px] bg-black/10 dark:bg-white/10 mx-0.5" style={{ height: (28 / (canvasZoom / 100)) + 'px' }} />
+                              </>
+                            )}
                             <button
                               onClick={() => {
                                 saveHistoryState();
@@ -4324,192 +4341,163 @@ ${analysisContext}${additionalDirection}
                     ? 'translate-y-10 opacity-0 pointer-events-none'
                     : 'translate-0 opacity-100 pointer-events-auto'}
               `}>
-                <aside
-                  className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10"
-                >
+                {/* V337 CHANGE VIEWPOINT Panel — 통합 레이아웃 */}
+                <aside className="h-full w-full rounded-[20px] flex flex-col overflow-hidden bg-white/80 dark:bg-black/80 backdrop-blur-sm border border-black/10 dark:border-white/10">
                   <div className="flex flex-col h-full">
-                    <div className="flex-1 overflow-y-auto px-4 pb-4 pt-4 min-h-0 flex flex-col gap-5 custom-scrollbar">
+                    <div className="flex-1 overflow-hidden px-4 pb-2 pt-4 min-h-0 flex flex-col gap-5">
 
-                      <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Change Viewpoint</span>
-
-                      {/* STAGE 1: ANALYZE 상태 */}
-                      {!cvHasAnalyzed && !isAnalyzing && (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-8">
-                          <div className="flex flex-col items-center gap-2 opacity-40">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><circle cx="11" cy="11" r="3"/>
-                            </svg>
-                            <p className="font-mono text-xs text-center">이미지를 분석하여<br/>시점 데이터를 추출합니다.</p>
-                          </div>
-                          <p className="font-mono text-[10px] opacity-30 text-center">ANALYZE 버튼을 클릭하여 시작하세요.</p>
+                      {/* 상단 고정 영역: Viewpoint & Analysis */}
+                      <div className="flex flex-col gap-5 shrink-0">
+                        {/* ── VIEWPOINT 섹션: SitePlanDiagram 상시 표시, 분석 후 angle 연동 ── */}
+                        <div className="flex flex-col gap-3">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Viewpoint</span>
+                          <SitePlanDiagram
+                            angle={analyzedOpticalParams?.angle ?? '06:00'}
+                            lens={typeof analyzedOpticalParams?.lens === 'number' ? analyzedOpticalParams.lens : 85}
+                            isAnalyzing={isAnalyzing}
+                            analysisStep={analysisStep}
+                          />
                         </div>
-                      )}
 
-                      {/* ANALYZING 로딩 */}
-                      {isAnalyzing && (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-3 opacity-60">
-                          <Loader2 size={28} className="animate-spin" />
-                          <p className="font-mono text-xs text-center">{analysisStep || 'ANALYZING...'}</p>
-                        </div>
-                      )}
-
-                      {/* STAGE 2: 분석 완료 — 결과 표시 + 뷰 선택 */}
-                      {cvHasAnalyzed && !isAnalyzing && (
-                        <>
-                          {/* 분석 결과 요약 */}
-                          {analyzedOpticalParams && (
-                            <div className="flex flex-col gap-2">
-                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Analysis Result</span>
-                              <div className="rounded-[12px] border border-black/10 dark:border-white/10 bg-white/30 dark:bg-black/30 p-3 flex flex-col gap-1.5">
-                                <div className="flex justify-between font-mono text-[10px]">
-                                  <span className="opacity-50">Angle</span>
-                                  <span className="font-medium">{analyzedOpticalParams.angle}</span>
-                                </div>
-                                <div className="flex justify-between font-mono text-[10px]">
-                                  <span className="opacity-50">Altitude</span>
-                                  <span className="font-medium truncate max-w-[140px] text-right">{analyzedOpticalParams.altitude}</span>
-                                </div>
-                                <div className="flex justify-between font-mono text-[10px]">
-                                  <span className="opacity-50">Focal Length</span>
-                                  <span className="font-medium truncate max-w-[140px] text-right">{analyzedOpticalParams.lens}</span>
-                                </div>
-                                {cvAnalysisReport?.section1?.viewpoint && (
-                                  <div className="flex justify-between font-mono text-[10px]">
-                                    <span className="opacity-50">Viewpoint</span>
-                                    <span className="font-medium truncate max-w-[140px] text-right">{cvAnalysisReport.section1.viewpoint}</span>
-                                  </div>
-                                )}
+                        {/* ── ANALYSIS 섹션: 분석 전 none, 분석 후 실제 값 ── */}
+                        <div className="flex flex-col gap-2">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Analysis</span>
+                          <div className="flex flex-col">
+                            {[
+                              { label: 'Angle',    value: analyzedOpticalParams?.angle ?? 'none' },
+                              { label: 'Altitude', value: analyzedOpticalParams?.altitude !== undefined ? `${String(analyzedOpticalParams.altitude).match(/\d+(?:\.\d+)?/)?.[0] || '1.6'}m` : 'none' },
+                              { label: 'Lens',     value: analyzedOpticalParams?.lens != null ? `${String(analyzedOpticalParams.lens).match(/\d+(?:\.\d+)?/)?.[0] || '35'}mm` : 'none' },
+                            ].map(({ label, value }) => (
+                              <div key={label} className="flex justify-between font-mono text-[11px] py-1.5 border-b border-black/5 dark:border-white/5 last:border-b-0">
+                                <span className="opacity-50">{label}</span>
+                                <span className={`font-medium ${value === 'none' ? 'opacity-30' : ''}`}>{value}</span>
                               </div>
-                              {/* Re-analyze 버튼 */}
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 하단 스크롤 영역: View & View details */}
+                      <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-5 pr-1">
+                        {/* ── VIEW 섹션: 상시 표시, 분석 전 비활성화 ── */}
+                        <div className="flex flex-col gap-2 shrink-0">
+                          <span className="font-mono text-xs opacity-70 uppercase tracking-widest">View</span>
+                          <div className="flex flex-col gap-2">
+                            {[
+                              { key: 'birdEye'   as const, label: "BIRD'S EYE VIEW"   },
+                              { key: 'eyeLevel'  as const, label: 'PERSPECTIVE VIEW'   },
+                              { key: 'front'     as const, label: 'FRONT VIEW'         },
+                              { key: 'rightSide' as const, label: 'RIGHT / LEFT VIEW'  },
+                              { key: 'top'       as const, label: 'TOP VIEW'           },
+                            ].map(({ key, label }) => (
                               <button
-                                onClick={handleCvAnalyze}
-                                disabled={isAnalyzing || isGenerating}
-                                className="w-full h-[32px] rounded-full border border-black/10 dark:border-white/10 bg-transparent font-mono text-[10px] uppercase tracking-widest opacity-50 hover:opacity-100 transition-all disabled:cursor-not-allowed"
+                                key={key}
+                                onClick={() => cvHasAnalyzed && setCvSelectedView(prev => prev === key ? null : key)}
+                                disabled={!cvHasAnalyzed}
+                                className={`h-[40px] w-full rounded-full font-display tracking-widest uppercase font-medium text-[13px] border border-black/10 dark:border-white/10 transition-all
+                                  ${!cvHasAnalyzed ? 'opacity-30 cursor-not-allowed bg-transparent' : ''}
+                                  ${cvSelectedView === key && cvHasAnalyzed
+                                    ? 'bg-black dark:bg-white text-white dark:text-black'
+                                    : cvHasAnalyzed ? 'bg-transparent hover:bg-black/5 dark:hover:bg-white/5' : ''}`}
                               >
-                                Re-Analyze
+                                {label}
                               </button>
-                            </div>
-                          )}
-
-                          {/* 뷰 타입 선택 */}
-                          <div className="flex flex-col gap-2">
-                            <span className="font-mono text-xs opacity-70 uppercase tracking-widest">View Type</span>
-                            <div className="flex flex-col gap-2">
-                              {[
-                                { key: 'eyeLevel' as const, label: 'AISLE LEVEL VIEW' },
-                                { key: 'front' as const, label: 'FRONT VIEW' },
-                                { key: 'rightSide' as const, label: 'RIGHT / LEFT VIEW' },
-                                { key: 'birdEye' as const, label: "BIRD'S EYE VIEW" },
-                                { key: 'top' as const, label: 'TOP VIEW' },
-                              ].map(({ key, label }) => (
-                                <button
-                                  key={key}
-                                  onClick={() => setCvSelectedView(prev => prev === key ? null : key)}
-                                  className={`h-[40px] w-full rounded-full font-display tracking-widest uppercase font-medium text-[13px] border border-black/10 dark:border-white/10 transition-all
-                                    ${cvSelectedView === key
-                                      ? 'bg-black dark:bg-white text-white dark:text-black'
-                                      : 'bg-transparent hover:bg-black/5 dark:hover:bg-white/5'}`}
-                                >
-                                  {label}
-                                </button>
-                              ))}
-                            </div>
+                            ))}
                           </div>
+                        </div>
 
-                          {/* 뷰 세부 옵션 */}
-                          {cvSelectedView === 'eyeLevel' && (
-                            <div className="flex flex-col gap-2">
-                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
-                              <div className="flex gap-2">
-                                {(['04:30', '07:30'] as const).map(dir => (
-                                  <button key={dir} onClick={() => setCvEyeLevelDirection(dir)}
-                                    className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvEyeLevelDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
-                                    {dir === '04:30' ? '04:30 (R)' : '07:30 (L)'}
-                                  </button>
-                                ))}
+                        {/* ── 뷰 세부 옵션 (분석 완료 후에만 표시) ── */}
+                        {cvHasAnalyzed && !isAnalyzing && (
+                          <div className="flex flex-col gap-5 shrink-0 pb-4">
+                            {cvSelectedView === 'eyeLevel' && (
+                              <div className="flex flex-col gap-2">
+                                <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
+                                <div className="flex gap-2">
+                                  {(['04:30', '07:30'] as const).map(dir => (
+                                    <button key={dir} onClick={() => setCvEyeLevelDirection(dir)}
+                                      className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvEyeLevelDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                      {dir}
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          )}
-
-                          {cvSelectedView === 'front' && (
-                            <div className="flex flex-col gap-2">
-                              <div className="flex justify-between font-mono text-[10px]">
-                                <span className="opacity-50 uppercase tracking-widest">Altitude</span>
-                                <span className="font-medium">{cvFrontAltitude}m</span>
+                            )}
+                            {cvSelectedView === 'front' && (
+                              <div className="flex flex-col gap-2">
+                                <div className="flex justify-between font-mono text-[10px]">
+                                  <span className="opacity-50 uppercase tracking-widest">Altitude</span>
+                                  <span className="font-medium">{cvFrontAltitude}m</span>
+                                </div>
+                                <div className="flex gap-1.5 flex-wrap">
+                                  {[0, 1.6, 10, 50, 150].map(val => (
+                                    <button key={val} onClick={() => setCvFrontAltitude(val)}
+                                      className={`flex-1 min-w-[36px] h-[32px] rounded-full font-mono text-[10px] border border-black/10 dark:border-white/10 transition-all ${cvFrontAltitude === val ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                      {val}m
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                              <input type="range" min="1" max="20" step="0.5" value={cvFrontAltitude}
-                                onChange={e => setCvFrontAltitude(Number(e.target.value))}
-                                className="w-full accent-black dark:accent-white cursor-pointer"
-                                onPointerDown={e => e.stopPropagation()} />
-                            </div>
-                          )}
-
-                          {cvSelectedView === 'rightSide' && (
-                            <div className="flex flex-col gap-2">
-                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
-                              <div className="flex gap-2">
-                                {(['03:00', '09:00'] as const).map(dir => (
-                                  <button key={dir} onClick={() => setCvRightSideDirection(dir)}
-                                    className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvRightSideDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
-                                    {dir === '03:00' ? 'RIGHT' : 'LEFT'}
-                                  </button>
-                                ))}
+                            )}
+                            {cvSelectedView === 'rightSide' && (
+                              <>
+                                <div className="flex flex-col gap-2">
+                                  <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
+                                  <div className="flex gap-2">
+                                    {(['03:00', '09:00'] as const).map(dir => (
+                                      <button key={dir} onClick={() => setCvRightSideDirection(dir)}
+                                        className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvRightSideDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                        {dir}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <div className="flex justify-between font-mono text-[10px]">
+                                    <span className="opacity-50 uppercase tracking-widest">Altitude</span>
+                                    <span className="font-medium">{cvRightSideAltitude}m</span>
+                                  </div>
+                                  <div className="flex gap-1.5 flex-wrap">
+                                    {[0, 1.6, 10, 50, 150].map(val => (
+                                      <button key={val} onClick={() => setCvRightSideAltitude(val)}
+                                        className={`flex-1 min-w-[36px] h-[32px] rounded-full font-mono text-[10px] border border-black/10 dark:border-white/10 transition-all ${cvRightSideAltitude === val ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                        {val}m
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                            {cvSelectedView === 'birdEye' && (
+                              <div className="flex flex-col gap-2">
+                                <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
+                                <div className="flex gap-2">
+                                  {(['04:30', '07:30'] as const).map(dir => (
+                                    <button key={dir} onClick={() => setCvBirdEyeDirection(dir)}
+                                      className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvBirdEyeDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
+                                      {dir}
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
-                              <div className="flex justify-between font-mono text-[10px]">
-                                <span className="opacity-50 uppercase tracking-widest">Altitude</span>
-                                <span className="font-medium">{cvRightSideAltitude}m</span>
-                              </div>
-                              <input type="range" min="1" max="20" step="0.5" value={cvRightSideAltitude}
-                                onChange={e => setCvRightSideAltitude(Number(e.target.value))}
-                                className="w-full accent-black dark:accent-white cursor-pointer"
-                                onPointerDown={e => e.stopPropagation()} />
-                            </div>
-                          )}
-
-                          {cvSelectedView === 'birdEye' && (
-                            <div className="flex flex-col gap-2">
-                              <span className="font-mono text-[10px] opacity-50 uppercase tracking-widest">Direction</span>
-                              <div className="flex gap-2">
-                                {(['04:30', '07:30'] as const).map(dir => (
-                                  <button key={dir} onClick={() => setCvBirdEyeDirection(dir)}
-                                    className={`flex-1 h-[36px] rounded-full font-mono text-[11px] border border-black/10 dark:border-white/10 transition-all ${cvBirdEyeDirection === dir ? 'bg-black/10 dark:bg-white/10 font-medium' : 'bg-transparent hover:bg-black/5'}`}>
-                                    {dir === '04:30' ? '04:30 (R)' : '07:30 (L)'}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Prompt Section (분석 후에만 표시) */}
-                          <div className="flex flex-col gap-2">
-                            <span className="font-mono text-xs opacity-70 uppercase tracking-widest">Additional Prompt</span>
-                            <textarea
-                              value={cvPrompt}
-                              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setCvPrompt(e.target.value)}
-                              placeholder="추가 지시사항 (선택사항)..."
-                              className="w-full h-[80px] resize-none rounded-[12px] border border-black/10 dark:border-white/10 bg-white/50 dark:bg-black/50 p-3 font-mono text-xs focus:outline-none focus:border-black/30 dark:focus:border-white/30"
-                              onPointerDown={(e: React.PointerEvent) => e.stopPropagation()}
-                            />
+                            )}
                           </div>
-                        </>
-                      )}
+                        )}
+                      </div>
                     </div>
 
-                    {/* 하단 버튼: ANALYZE (초기) → GENERATE (분석 후) */}
+                    {/* 하단 버튼: ANALYSIS (초기) → GENERATE (분석 후) */}
                     <div className="px-4 pb-2 pt-2 shrink-0">
                       {!cvHasAnalyzed ? (
-                        // ANALYZE 버튼
                         <button
                           onClick={isAnalyzing ? handleCancelGenerate : handleCvAnalyze}
                           disabled={isGenerating}
                           className="relative w-full h-[44px] rounded-full transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center overflow-hidden border border-black/10 dark:border-white/10 bg-black text-white dark:bg-white dark:text-black"
                         >
                           <span className="font-display tracking-widest uppercase font-medium text-[16px] z-10">
-                            {isAnalyzing ? <Loader2 size={16} className="animate-spin z-10" /> : 'ANALYZE'}
+                            {isAnalyzing ? <Loader2 size={16} className="animate-spin z-10" /> : 'ANALYSIS'}
                           </span>
                         </button>
                       ) : (
-                        // GENERATE 버튼
                         <button
                           onClick={isGenerating ? handleCancelGenerate : handleGenerate}
                           disabled={isAnalyzing || !cvSelectedView}
